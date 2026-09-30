@@ -204,12 +204,28 @@ def test_spoken_or_typed_items_nlp():
 
     print("[OK] Spoken/Typed NLP parser verified with Cooked Daal (250g), Raw Chicken (1kg), and Indian Curd (500g)!")
 
+def test_parse_voice_endpoint():
+    multi_item_voice = "Cooked Indian Daal 300 grams, 1 kg chicken breasts, 500 grams curd, and two bags of frozen green peas in the freezer"
+    res = client.post("/api/parse-voice", json={"voice_transcript": multi_item_voice})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    items = data["items"]
+    assert len(items) >= 4, f"Expected at least 4 items, got {len(items)}"
+    
+    # Check that frozen peas are mapped to Freezer
+    freezer_item = next((i for i in items if "peas" in i["name"].lower() or "frozen" in i["name"].lower()), None)
+    assert freezer_item is not None
+    assert freezer_item["storage_type"] == "Freezer"
+    print(f"[OK] Multi-item voice dictation endpoint verified: {len(items)} items documented into Fridge and Freezer!")
+
 if __name__ == "__main__":
     try:
         test_health()
         test_sample_data()
         test_analyze_fridge_fallback()
         test_spoken_or_typed_items_nlp()
+        test_parse_voice_endpoint()
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()
         test_indian_egg_free_elderly_member()

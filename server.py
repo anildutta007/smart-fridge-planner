@@ -899,37 +899,52 @@ async def analyze_fridge(
             "items": fallback_data
         }
 
-    # Call Gemini Vision with multi-model fallback
+    # Call Gemini Vision with multi-model fallback (Gemini 2.0 Flash)
     try:
         client = genai.Client(api_key=api_key)
         
-        prompt = """
-You are an expert chef, nutritionist, and computer vision food analyst.
-Analyze the provided image of a refrigerator, freezer, or pantry (and any accompanying notes).
+        sharp_vision_prompt = """You are an elite food computer vision specialist and kitchen inventory auditor.
+Examine this photograph of a refrigerator, freezer, or kitchen pantry with extreme precision and convert what you see into real, structured food items.
 
-Identify EVERY food item visible. It is CRITICAL that you clearly separate:
-1. "cooked_leftover": Cooked food, meal prep in Tupperware/containers, prepared dishes, opened takeout, cooked rice/pasta. Mark urgency as "high" (eat in 1-2 days).
-2. "raw_ingredient": Fresh uncooked meat, poultry, fish, whole/cut vegetables, fruits, eggs, blocks of cheese, yogurt, raw milk, unmixed pantry staples.
-
-For each item, return a JSON object with:
-- "id": short unique string like "item-1", "item-2"
-- "name": clear descriptive name (e.g. "Leftover Roast Chicken in Glass Dish", "Broccoli Crown", "6 Large Eggs")
-- "category": either "cooked_leftover" or "raw_ingredient"
-- "sub_category": one of ["meat", "poultry", "seafood", "dairy", "produce", "grain", "prepared", "condiment", "beverage", "other"]
-- "quantity": estimated visible quantity (e.g., "approx 400g", "3 pieces")
-- "portions": numerical estimate of adult servings (e.g., 2.0, 1.5, 4.0)
-- "urgency": "high" for cooked leftovers or raw fish/poultry nearing expiry, "medium" for raw veggies/dairy, "low" for long-life items
-- "dietary_tags": list of applicable tags like ["Vegetarian", "Vegan", "Gluten-Free", "Dairy-Free", "Halal", "High-Protein", "Keto-Friendly"]
-- "storage_type": "Fridge", "Freezer", or "Pantry"
-- "notes": brief notes
+CRITICAL DETECTION INSTRUCTIONS:
+1. DEEP VISUAL SCANNING:
+   - Systematically inspect all shelves (top, middle, bottom), crisper drawers, door bins, and freezer compartments.
+   - Do NOT produce vague categories like "various items" or "miscellaneous". Be specific and accurate.
+2. DISHES & PREPARED FOOD (COOKED LEFTOVERS):
+   - Look closely at glass containers (Pyrex), plastic Tupperware, foil-wrapped items, bowls, and takeout containers.
+   - Accurately determine the dish inside (e.g. "Cooked Dal / Lentil Curry", "Cooked Basmati Rice", "Leftover Chicken Curry", "Pasta with Tomato Sauce", "Soup").
+   - Mark category as "cooked_leftover" and urgency as "high" (Priority 1: must be eaten in 1-2 days).
+   - Estimate the weight/portions based on container size (e.g., "approx 350g", "2 servings").
+3. STORE PACKAGES & OCR (RAW INGREDIENTS & STAPLES):
+   - Read visible text on labels, cartons, jars, bottles, and packaging (e.g. "Greek Style Yogurt 500g", "Mature Cheddar 200g", "Whole Milk 1L", "Tofu 400g", "Free-Range Eggs 6-pack").
+   - Detect raw proteins (e.g. "Raw Chicken Breasts 500g", "Minced Beef 400g", "Salmon Fillets").
+   - Mark category as "raw_ingredient".
+4. FRESH PRODUCE:
+   - Identify whole or cut vegetables and fruits (e.g. "2 Red Bell Peppers", "Broccoli Crown", "Cucumbers", "Tomatoes", "Lemons").
+   - Mark category as "raw_ingredient" with urgency "medium".
+5. COMPARTMENT & STORAGE DETECTION:
+   - If frosted or in a freezer drawer/compartment -> storage_type: "Freezer", urgency: "low".
+   - Otherwise -> storage_type: "Fridge".
 
 Respond with ONLY valid JSON:
 {
-  "items": [...],
-  "detection_summary": "Brief summary"
+  "items": [
+    {
+      "id": "item-1",
+      "name": "Food Name",
+      "category": "cooked_leftover" | "raw_ingredient",
+      "quantity": "approx 350g / 500g / 1 kg / 6 eggs",
+      "portions": 2.0,
+      "urgency": "high" | "medium" | "low",
+      "storage_type": "Fridge" | "Freezer",
+      "dietary_tags": ["Vegetarian", "High-Protein", etc.],
+      "notes": "Storage or packaging details"
+    }
+  ],
+  "detection_summary": "Identified X distinct items across shelves."
 }
 """
-        contents = [prompt]
+        contents = [sharp_vision_prompt]
         if text_notes and text_notes.strip():
             contents.append(f"Additional user notes/inventory:\n{text_notes.strip()}")
             
@@ -945,14 +960,14 @@ Respond with ONLY valid JSON:
                     contents=contents,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json",
-                        temperature=0.2
+                        temperature=0.1
                     )
                 )
                 parsed = json.loads(response.text)
                 return {
                     "status": "success",
                     "source": model_name,
-                    "message": "Fridge scanned successfully with Gemini AI Vision!",
+                    "message": "Fridge scanned with sharp Gemini 2.0 Flash Vision!",
                     "items": parsed.get("items", []),
                     "detection_summary": parsed.get("detection_summary", "Fridge scanned successfully.")
                 }
@@ -971,6 +986,144 @@ Respond with ONLY valid JSON:
             "message": f"Gemini API returned an error ({str(e)[:100]}...). Loaded smart offline inventory so you can continue testing!",
             "items": fallback
         }
+
+class ParseVoiceRequest(BaseModel):
+    voice_transcript: str
+
+@api_router.post("/parse-voice")
+async def parse_voice(
+    req: ParseVoiceRequest,
+    x_gemini_key: Optional[str] = Header(None)
+):
+    """
+    Parses a single continuous voice dictation containing MULTIPLE food items
+    into clean, categorized items with weights, portions, and storage locations.
+    """
+    api_key = get_effective_api_key(x_gemini_key)
+    transcript = (req.voice_transcript or "").strip()
+    if not transcript:
+        return {"status": "success", "items": [], "message": "No transcript provided."}
+
+    # 1. Try Gemini 2.0 Flash if API key is present
+    if api_key and GENAI_AVAILABLE:
+        try:
+            client = genai.Client(api_key=api_key)
+            prompt = f"""You are an expert food inventory auditor.
+A family member dictated multiple food items stored in their fridge or freezer in one continuous voice recording:
+"{transcript}"
+
+Task: Separate and document EVERY distinct food item mentioned into valid JSON.
+Rules:
+1. "category": "cooked_leftover" (for prepared dishes, curries, daals, cooked rice/pasta, meal preps, opened takeout) OR "raw_ingredient" (for fresh produce, raw meat/fish, dairy, eggs, pantry staples).
+2. "quantity": extract weight, volume, or count (e.g. "250 gms", "1 kg", "500 grams", "2 boxes", "6 eggs").
+3. "portions": realistic adult servings (e.g. 1.5, 4.0, 3.0).
+4. "storage_type": "Freezer" if frozen or mentioned in freezer; otherwise "Fridge".
+5. "urgency": "high" for cooked leftovers and raw meats; "medium" for fresh produce/dairy; "low" for freezer or shelf-stable.
+6. "name": clean, concise food name (e.g. "Cooked Indian Daal", "Raw Chicken Breasts", "Indian Curd", "Frozen Green Peas").
+
+Output ONLY JSON matching:
+{{
+  "items": [
+    {{
+      "id": "item-1",
+      "name": "Food Name",
+      "category": "cooked_leftover" | "raw_ingredient",
+      "quantity": "250 gms",
+      "portions": 2.0,
+      "storage_type": "Fridge" | "Freezer",
+      "urgency": "high" | "medium" | "low",
+      "dietary_tags": [],
+      "notes": "Spoken details"
+    }}
+  ],
+  "summary": "Documented X items from voice dictation."
+}}"""
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.1
+                )
+            )
+            parsed = json.loads(response.text)
+            return {
+                "status": "success",
+                "source": "gemini_2.0_flash",
+                "items": parsed.get("items", []),
+                "message": parsed.get("summary", f"Successfully documented {len(parsed.get('items', []))} items from your voice recording!")
+            }
+        except Exception as e:
+            print(f"Gemini voice parsing error: {e}. Falling back to NLP regex parser.")
+
+    # 2. High-precision NLP regex fallback
+    import re
+    segments = [s.strip() for s in re.split(r'[\n\r]+|\.{2,}|,|;|\b(?:and\s+then|and\s+also)\b|[•\*\-]\s+', transcript) if s.strip()]
+    refined = []
+    for seg in segments:
+        and_parts = re.split(r'\s+and\s+', seg, flags=re.I)
+        if len(and_parts) > 1:
+            for p in and_parts:
+                if p.strip(): refined.append(p.strip())
+        else:
+            refined.append(seg)
+
+    parsed_items = []
+    for idx, text in enumerate(refined):
+        lower = text.lower()
+        is_freezer = bool(re.search(r'\b(?:freezer|frozen|deep\s*freeze|in\s*freezer)\b', lower))
+        is_cooked = bool(re.search(r'\b(?:cooked|leftover|left over|curry|daal|dal|dhal|biryani|khichdi|rice|pasta|stew|soup|roast|roasted|boiled|baked|fried|grilled|tikka|masala|korma)\b', lower)) and not bool(re.search(r'\b(?:raw|uncooked)\b', lower))
+
+        qty = "1 portion"
+        portions = 2.0
+        kg_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:kilograms|kilogram|kilos|kilo|kgs|kg)\b', text, re.I)
+        gm_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:gms|gm|grams|gram|g)\b', text, re.I)
+        count_m = re.search(r'(\d+)\s*(?:pieces|piece|pcs|pack|packs|packet|packets|bags|bag|cans|can|eggs|breasts|fillets|tubs|boxes)\b', text, re.I)
+        portion_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:portions|portion|servings|serving|bowls|bowl)\b', text, re.I)
+
+        if kg_m:
+            val = float(kg_m.group(1))
+            qty = f"{val} kg"
+            portions = max(1.0, round(val * 4))
+        elif gm_m:
+            val = float(gm_m.group(1))
+            qty = f"{val} gms"
+            portions = 1.5 if val <= 300 else (3.0 if val <= 600 else max(1.0, round(val / 200)))
+        elif count_m:
+            qty = count_m.group(0).strip()
+            portions = max(1.0, round(int(count_m.group(1)) / 2))
+        elif portion_m:
+            portions = float(portion_m.group(1))
+            qty = f"{portions} portions"
+
+        clean_name = re.sub(r'\b(?:in\s+the\s+freezer|in\s+freezer|in\s+the\s+fridge|in\s+fridge)\b', '', text, flags=re.I)
+        clean_name = re.sub(r'\b(?:around|approx|about)?\s*\d+(?:\.\d+)?\s*(?:gms|gm|grams|gram|g|kg|kgs|kilos|kilograms|ml|l|litres|liters)\b', '', clean_name, flags=re.I)
+        clean_name = re.sub(r'\b\d+\s*(?:portions|portion|servings|serving|bowls|bowl|pieces|piece|pcs|pack|packs|packet|packets|bags|bag|cans|can|tubs|boxes)\b', '', clean_name, flags=re.I)
+        clean_name = re.sub(r'\s{2,}', ' ', clean_name).strip()
+        clean_name = clean_name.capitalize() if clean_name else text.capitalize()
+
+        urgency = "high" if is_cooked or ("chicken" in lower or "meat" in lower or "fish" in lower) else ("low" if is_freezer else "medium")
+        if is_freezer and not is_cooked:
+            urgency = "low"
+
+        parsed_items.append({
+            "id": f"item-{idx+1}",
+            "name": clean_name,
+            "category": "cooked_leftover" if is_cooked else "raw_ingredient",
+            "quantity": qty,
+            "portions": portions,
+            "storage_type": "Freezer" if is_freezer else "Fridge",
+            "urgency": urgency,
+            "dietary_tags": [],
+            "notes": "Documented from voice dictation."
+        })
+
+    return {
+        "status": "success",
+        "source": "nlp_engine",
+        "items": parsed_items,
+        "message": f"Successfully documented {len(parsed_items)} items from your voice recording!"
+    }
 
 @api_router.post("/generate-plan")
 async def generate_plan(

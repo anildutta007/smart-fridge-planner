@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SmartFridge AI - Household Meal & Leftovers Planner</title>
+  <title>SmartFridge AI - Family Fridge & Freezer Food Documenter</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥗</text></svg>">
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -14,86 +14,67 @@
 <body class="min-h-screen flex flex-col bg-slate-50 text-slate-800">
 
   <!-- TOP HEADER -->
-  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+      
+      <!-- Brand & Subtitle -->
       <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center text-2xl shadow-sm">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center text-2xl shadow-sm">
           <i class="ph-bold ph-refrigerator"></i>
         </div>
         <div>
           <div class="flex items-center space-x-2">
-            <h1 class="text-xl font-bold text-slate-900 tracking-tight">SmartFridge AI</h1>
-            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Gemini 2.5 Flash</span>
+            <h1 class="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">SmartFridge AI</h1>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 uppercase tracking-wider">Vision 2.0</span>
           </div>
-          <p class="text-xs text-slate-500">Dietary-customized, zero-waste 7-day meal planner</p>
+          <p class="text-xs text-slate-500">Fast Family Fridge & Freezer Food Documenter</p>
         </div>
       </div>
 
-      <!-- Quick Metrics & API Settings -->
-      <div class="flex items-center space-x-3">
-        <div class="hidden md:flex items-center space-x-2 text-xs font-medium bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+      <!-- Quick Metrics & Status -->
+      <div class="flex items-center space-x-2.5 sm:space-x-3">
+        
+        <!-- Live Food Counters -->
+        <div class="hidden sm:flex items-center space-x-2 text-xs font-semibold bg-slate-100/80 px-3 py-1.5 rounded-xl border border-slate-200">
           <span class="flex items-center space-x-1 text-slate-700">
-            <i class="ph ph-users text-indigo-500 text-sm"></i>
-            <span id="headerMemberCount">3</span> Members
+            <i class="ph-bold ph-thermometer-cold text-blue-500"></i>
+            <span id="headerFridgeCount">0</span> Fridge
           </span>
           <span class="text-slate-300">|</span>
-          <span class="flex items-center space-x-1 text-red-600">
-            <i class="ph-bold ph-warning-circle text-red-500 text-sm"></i>
-            <span id="headerLeftoverCount">2</span> Leftovers
+          <span class="flex items-center space-x-1 text-cyan-700">
+            <i class="ph-bold ph-snowflake text-cyan-500"></i>
+            <span id="headerFreezerCount">0</span> Freezer
           </span>
           <span class="text-slate-300">|</span>
-          <span class="flex items-center space-x-1 text-emerald-700">
-            <i class="ph ph-plant text-emerald-500 text-sm"></i>
-            <span id="headerRawCount">6</span> Raw Items
+          <span class="flex items-center space-x-1 text-red-600 font-bold">
+            <i class="ph-bold ph-warning-circle text-red-500"></i>
+            <span id="headerLeftoverCount">0</span> Leftovers
           </span>
         </div>
 
-        <!-- Family Profile & PIN Status Button -->
-        <button id="btnFamilyProfile" onclick="openFamilyModal()" class="text-xs font-semibold flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-sm" title="Family Profile & PIN Settings">
+        <!-- Family Profile Selector -->
+        <button id="btnFamilyProfile" onclick="openFamilyModal()" class="text-xs font-semibold flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-xs cursor-pointer" title="Family Profile & Storage">
           <i class="ph-bold ph-house-line text-sm text-emerald-600"></i>
           <span id="headerFamilyName">Family Profile</span>
-          <span id="headerPinBadge" class="hidden text-[10px] px-1.5 py-0.5 bg-emerald-200 text-emerald-900 rounded-full font-bold flex items-center space-x-0.5">
-            <i class="ph-bold ph-lock-key"></i>
-            <span>PIN</span>
-          </span>
+          <span id="headerPinBadge" class="hidden text-[10px] px-1.5 py-0.2 bg-emerald-200 text-emerald-900 rounded-full font-bold">PIN</span>
         </button>
 
-        <button id="btnOpenSettings" class="text-xs font-semibold flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition">
-          <i class="ph-bold ph-gear"></i>
-          <span>Gemini Key</span>
+        <!-- Vision AI Status & Settings Button -->
+        <button onclick="openSettingsModal()" class="text-xs font-semibold flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition shadow-xs cursor-pointer" title="Gemini Vision API Key Settings">
+          <span id="visionStatusIndicator" class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span id="visionStatusLabel" class="hidden sm:inline">Gemini AI</span>
+          <i class="ph-bold ph-gear text-slate-400"></i>
         </button>
+
       </div>
-    </div>
-
-    <!-- TABS NAVIGATION -->
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-100">
-      <nav class="flex space-x-2 sm:space-x-8 -mb-px overflow-x-auto text-sm font-medium">
-        <button id="tabBtnMembers" onclick="switchTab('members')" class="tab-nav-btn py-3 px-2 border-b-2 border-emerald-500 text-emerald-600 font-semibold flex items-center space-x-2 whitespace-nowrap">
-          <i class="ph-bold ph-users-three text-lg"></i>
-          <span>1. Household Profiles</span>
-          <span id="badgeMemberTab" class="ml-1.5 px-2 py-0.2 bg-emerald-100 text-emerald-800 text-xs rounded-full">3</span>
-        </button>
-
-        <button id="tabBtnFridge" onclick="switchTab('fridge')" class="tab-nav-btn py-3 px-2 border-b-2 border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 flex items-center space-x-2 whitespace-nowrap">
-          <i class="ph-bold ph-camera text-lg"></i>
-          <span>2. Fridge Snapshot & Inventory</span>
-          <span id="badgeFridgeTab" class="ml-1.5 px-2 py-0.2 bg-slate-100 text-slate-700 text-xs rounded-full">8</span>
-        </button>
-
-        <button id="tabBtnPlan" onclick="switchTab('plan')" class="tab-nav-btn py-3 px-2 border-b-2 border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 flex items-center space-x-2 whitespace-nowrap">
-          <i class="ph-bold ph-calendar-check text-lg"></i>
-          <span>3. 7-Day Meal Plan</span>
-          <span id="badgePlanStatus" class="ml-1.5 px-2 py-0.2 bg-amber-100 text-amber-800 text-xs rounded-full">Ready</span>
-        </button>
-      </nav>
     </div>
   </header>
 
   <!-- MAIN CONTAINER -->
-  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+  <main class="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
 
     <!-- ALERT BANNER -->
-    <div id="toastNotification" class="hidden mb-4 p-4 rounded-xl border flex items-center justify-between transition-all">
+    <div id="toastNotification" class="hidden p-4 rounded-2xl border flex items-center justify-between transition-all shadow-sm">
       <div class="flex items-center space-x-3">
         <i id="toastIcon" class="ph-bold ph-check-circle text-xl"></i>
         <span id="toastText" class="text-sm font-medium"></span>
@@ -104,208 +85,234 @@
     </div>
 
     <!-- ========================================== -->
-    <!-- TAB 1: HOUSEHOLD MEMBERS & DIETARY PROFILES -->
+    <!-- 1. FOOD CAPTURE CENTER: SPEAK / PHOTO / TYPE -->
     <!-- ========================================== -->
-    <div id="tabContentMembers" class="tab-content active space-y-6">
+    <div class="bg-white rounded-2xl border border-slate-200 card-shadow overflow-hidden">
       
-      <!-- Top Action Bar -->
-      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 card-shadow">
-        <div>
-          <h2 class="text-lg font-bold text-slate-900">Household Members & Dietary Needs</h2>
-          <p class="text-xs text-slate-500 mt-0.5">Customize age, sex, dietary requirements, and meal counts so the AI portions and verifies safety for each individual.</p>
+      <!-- Mode Tabs (Speak / Photo / Type) -->
+      <div class="border-b border-slate-100 bg-slate-50/70 p-2 sm:p-3 flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center space-x-1 sm:space-x-2">
+          <button id="btnTabVoice" onclick="switchCaptureMode('voice')" class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center space-x-2 transition bg-white text-emerald-700 shadow-xs border border-slate-200">
+            <i class="ph-bold ph-microphone text-emerald-600 text-base"></i>
+            <span>Speak Items</span>
+            <span class="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded-full font-bold">Multi-Item</span>
+          </button>
+
+          <button id="btnTabCamera" onclick="switchCaptureMode('camera')" class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center space-x-2 transition text-slate-600 hover:text-slate-900 hover:bg-white/80">
+            <i class="ph-bold ph-camera text-indigo-600 text-base"></i>
+            <span>Photo / Snapshot</span>
+            <span class="text-[10px] px-1.5 py-0.2 bg-indigo-100 text-indigo-800 rounded-full font-bold">Gemini 2.0</span>
+          </button>
+
+          <button id="btnTabType" onclick="switchCaptureMode('type')" class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center space-x-2 transition text-slate-600 hover:text-slate-900 hover:bg-white/80">
+            <i class="ph-bold ph-keyboard text-slate-600 text-base"></i>
+            <span>Type / Paste</span>
+          </button>
         </div>
-        <div class="flex items-center space-x-3 w-full sm:w-auto">
-          <button onclick="addElderlyIndianMotherPreset()" class="text-xs font-semibold px-3 py-2 rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 transition flex items-center space-x-1.5 shadow-sm" title="Quick-add Mother (Elderly, No Eggs, Indian Meals Only, No Pasta)">
-            <i class="ph-bold ph-heart"></i>
-            <span>+ Add Mother (Indian / No Eggs)</span>
+
+        <div class="flex items-center space-x-2">
+          <button onclick="openAddItemModal()" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center space-x-1 transition shadow-2xs">
+            <i class="ph-bold ph-plus-circle text-emerald-600"></i>
+            <span>+ Single Item</span>
           </button>
-          <button onclick="loadSampleHousehold()" class="text-xs font-semibold px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition flex items-center space-x-1.5">
-            <i class="ph-bold ph-sparkle"></i>
-            <span>Load Sample Family</span>
-          </button>
-          <button onclick="openAddMemberModal()" class="text-xs font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center space-x-1.5 shadow-sm">
-            <i class="ph-bold ph-user-plus"></i>
-            <span>Add Member</span>
+          <button onclick="loadSampleInventory()" class="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition flex items-center space-x-1" title="Load sample demo items for testing">
+            <i class="ph-bold ph-lightning"></i>
+            <span>Demo Items</span>
           </button>
         </div>
       </div>
 
-      <!-- Members Grid -->
-      <div id="membersContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        <!-- Injected via JavaScript -->
-      </div>
-
-      <!-- Summary & Next Button -->
-      <div class="flex justify-end pt-2">
-        <button onclick="switchTab('fridge')" class="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-black text-white font-semibold text-sm flex items-center space-x-2 transition shadow-sm">
-          <span>Proceed to Fridge Scanner</span>
-          <i class="ph-bold ph-arrow-right"></i>
-        </button>
-      </div>
-    </div>
-
-
-    <!-- ========================================== -->
-    <!-- TAB 2: FRIDGE SNAPSHOT & INVENTORY         -->
-    <!-- ========================================== -->
-    <div id="tabContentFridge" class="tab-content space-y-6">
-      
-      <!-- Simplified Add Items Card (Voice, Text, Weights, Cooked vs Raw) -->
-      <div class="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 card-shadow space-y-4">
+      <div class="p-5 sm:p-6">
         
-        <!-- Header & Quick Actions -->
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div>
-            <h2 class="text-lg font-bold text-slate-900 flex items-center space-x-2">
-              <i class="ph-bold ph-microphone text-emerald-600"></i>
-              <span>Add Items to Fridge & Freezer</span>
-            </h2>
-            <p class="text-xs text-slate-500 mt-0.5">
-              Speak or type what you have — cooked leftovers or raw ingredients with weights or portions. We'll automatically identify the category, weight, and urgency.
-            </p>
-          </div>
-          <div class="flex items-center space-x-2 flex-wrap">
-            <button type="button" onclick="openAddItemModal()" class="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center space-x-1.5 transition">
-              <i class="ph-bold ph-plus-circle text-emerald-600"></i>
-              <span>+ Add Single Item</span>
-            </button>
-            <button type="button" onclick="togglePhotoUploadSection()" id="btnTogglePhoto" class="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center space-x-1.5 transition">
-              <i class="ph-bold ph-camera text-indigo-600"></i>
-              <span>📷 Photo Scanner</span>
-            </button>
-            <button type="button" onclick="loadSampleInventory()" class="text-xs font-semibold px-2.5 py-2 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition flex items-center space-x-1" title="Load sample demo items for testing">
-              <i class="ph-bold ph-lightning"></i>
-              <span>Sample Demo</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Voice & Type Control Area -->
-        <div class="space-y-3">
-          <!-- Voice Banner with Tap-to-Speak button -->
-          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-emerald-50/80 via-teal-50/50 to-indigo-50/80 border border-emerald-200/80 rounded-xl">
-            <div class="flex items-center space-x-3">
-              <button id="btnVoiceInput" onclick="toggleVoiceRecording()" type="button" class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center space-x-2 shadow-sm transition active:scale-95 cursor-pointer">
-                <i id="voiceMicIcon" class="ph-bold ph-microphone text-lg"></i>
-                <span id="voiceMicLabel">Tap to Speak Items</span>
-              </button>
-              <span id="voiceStatusText" class="text-xs text-slate-600 font-medium">Click to speak (e.g. "Cooked Indian Daal 250 gms, Raw Chicken breasts 1 Kilogram")</span>
-            </div>
+        <!-- ===================================== -->
+        <!-- MODE 1: MULTI-ITEM VOICE RECORDING    -->
+        <!-- ===================================== -->
+        <div id="panelVoice" class="space-y-4">
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-gradient-to-r from-emerald-50/90 via-teal-50/60 to-indigo-50/70 border border-emerald-200/90 rounded-2xl">
             
-            <div class="flex items-center space-x-2 self-end sm:self-auto">
-              <button type="button" onclick="insertExampleInput()" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-indigo-700 hover:bg-indigo-50 transition shadow-xs">
-                💡 Try Example: Daal, Chicken, Curd
+            <div class="flex items-center space-x-3.5">
+              <!-- Microphone Button -->
+              <button id="btnVoiceRecord" onclick="toggleVoiceRecording()" type="button" class="px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center space-x-2.5 shadow-md transition active:scale-95 cursor-pointer">
+                <i id="voiceMicIcon" class="ph-bold ph-microphone text-xl"></i>
+                <span id="voiceMicLabel">Tap to Speak (Say Multiple Items)</span>
               </button>
-              <button type="button" onclick="clearVoiceTextInput()" class="text-[11px] text-slate-400 hover:text-slate-600 px-2 py-1">
+
+              <!-- Sound wave visualizer (visible while recording) -->
+              <div id="voiceWaveContainer" class="hidden items-center space-x-1 px-2">
+                <span class="voice-wave-bar"></span>
+                <span class="voice-wave-bar"></span>
+                <span class="voice-wave-bar"></span>
+                <span class="voice-wave-bar"></span>
+                <span class="voice-wave-bar"></span>
+              </div>
+
+              <!-- Status text -->
+              <div id="voiceStatusText" class="text-xs text-slate-600 font-medium">
+                Tap the mic and speak naturally: describe as many cooked leftovers, fresh meats, veggies, or freezer items as you want in one breath!
+              </div>
+            </div>
+
+            <!-- Quick helper buttons -->
+            <div class="flex items-center space-x-2 self-end sm:self-auto">
+              <button onclick="insertVoiceExample()" type="button" class="text-xs font-semibold px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-indigo-700 hover:bg-indigo-50 transition shadow-xs cursor-pointer">
+                💡 Try Multi-Item Voice Example
+              </button>
+              <button onclick="clearVoiceInput()" type="button" class="text-xs text-slate-400 hover:text-slate-600 px-2 py-1 cursor-pointer">
                 Clear
               </button>
             </div>
           </div>
 
-          <!-- Spoken or Typed Textarea -->
+          <!-- Live Voice Transcript Box -->
           <div class="relative">
-            <textarea id="textNotesInput" rows="4" placeholder="Speak using the button above or type your items here... e.g.&#10;Cooked Indian Daal 250 gms&#10;Raw Chicken breasts 1 Kilogram&#10;Indian curd around 500 grams&#10;Leftover vegetable biryani 2 bowls&#10;Frozen peas 1 pack in freezer" class="w-full text-xs sm:text-sm p-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none transition leading-relaxed"></textarea>
+            <textarea id="voiceTranscriptInput" rows="3" placeholder="Your spoken food words will appear here live... e.g.&#10;&quot;Cooked Indian Daal 250 gms, Raw Chicken breasts 1 Kilogram, Indian curd around 500 grams, and 2 bags of frozen green peas in the freezer.&quot;" class="w-full text-xs sm:text-sm p-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none transition leading-relaxed"></textarea>
           </div>
 
-          <!-- Bottom Action -->
+          <!-- Document Action -->
           <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
             <p class="text-[11px] text-slate-500">
-              💡 <strong>Smart auto-tagging:</strong> Cooked leftovers get <strong>Priority 1</strong> (eat in 1-2 days). Raw items are queued for recipes. You can edit any item once added!
+              ⚡ <strong>App takes full responsibility:</strong> Automatically separates each item, calculates weights, tags leftovers as <strong>Priority 1</strong>, and puts freezer items in the right compartment.
             </p>
-            <button id="btnAnalyzeFridge" onclick="processSpokenOrTypedItems()" type="button" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center space-x-2 transition shadow-md cursor-pointer">
+            <button id="btnDocumentVoice" onclick="documentVoiceItems()" type="button" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center space-x-2 transition shadow-md cursor-pointer">
               <i class="ph-bold ph-plus-circle text-lg"></i>
-              <span>Add Items to Fridge / Freezer</span>
+              <span>Document Spoken Items</span>
             </button>
           </div>
         </div>
 
-        <!-- Collapsible Photo Scanner Section (Hidden by default) -->
-        <div id="photoScannerSection" class="hidden pt-4 border-t border-slate-200 space-y-4">
-          <div class="flex items-center justify-between">
-            <h3 class="text-sm font-bold text-slate-800 flex items-center space-x-2">
-              <i class="ph-bold ph-camera text-indigo-600"></i>
-              <span>Optional: Photo Snapshot Scanner</span>
-            </h3>
-            <span class="text-xs text-slate-400">Gemini Vision AI</span>
+        <!-- ===================================== -->
+        <!-- MODE 2: SHARPER VISION SCANNER        -->
+        <!-- ===================================== -->
+        <div id="panelCamera" class="hidden space-y-4">
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2">
+            <div>
+              <h3 class="text-sm font-bold text-slate-900 flex items-center space-x-2">
+                <i class="ph-bold ph-camera text-indigo-600"></i>
+                <span>Gemini 2.0 Flash High-Precision Food Recognition</span>
+              </h3>
+              <p class="text-xs text-slate-500">Takes your fridge photo, reads package labels (OCR), identifies Tupperware dishes, and estimates weights.</p>
+            </div>
+            <div class="flex items-center space-x-2">
+              <button onclick="openCameraModal()" type="button" class="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition shadow-xs cursor-pointer">
+                <i class="ph-bold ph-webcam text-indigo-600"></i>
+                <span>Live Camera</span>
+              </button>
+            </div>
           </div>
 
           <!-- Drag and drop / file input -->
-          <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-6 text-center cursor-pointer transition bg-slate-50 hover:bg-emerald-50/30 flex flex-col items-center justify-center min-h-[160px]">
+          <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50/70 hover:bg-emerald-50/30 flex flex-col items-center justify-center min-h-[170px]">
             <input type="file" id="fileInput" accept="image/*" class="hidden">
             <div id="dropZoneDefault" class="space-y-2">
-              <div class="w-10 h-10 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xl">
+              <div class="w-12 h-12 mx-auto rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl shadow-xs">
                 <i class="ph-bold ph-upload-simple"></i>
               </div>
-              <p class="text-xs font-semibold text-slate-700">Click to upload or drag fridge photo here</p>
-              <p class="text-[11px] text-slate-400">Supports JPG, PNG, WEBP from your phone or camera</p>
+              <p class="text-sm font-bold text-slate-700">Click to upload or drag fridge / freezer photo here</p>
+              <p class="text-xs text-slate-400">Takes clear photo of shelves, Tupperwares, vegetable crisper, or freezer drawers</p>
             </div>
             <!-- Image preview -->
             <div id="imagePreviewContainer" class="hidden relative w-full">
-              <img id="imagePreview" src="" alt="Fridge snapshot" class="max-h-52 mx-auto rounded-lg object-contain shadow-sm border border-slate-200">
-              <button onclick="clearImage(event)" class="absolute top-2 right-2 bg-red-600 text-white rounded-full p-1 text-xs hover:bg-red-700 shadow">
+              <img id="imagePreview" src="" alt="Fridge snapshot" class="max-h-60 mx-auto rounded-xl object-contain shadow-sm border border-slate-200">
+              <button onclick="clearImage(event)" class="absolute top-2 right-2 bg-red-600 text-white rounded-full p-1.5 text-xs hover:bg-red-700 shadow cursor-pointer">
                 <i class="ph-bold ph-x"></i>
               </button>
             </div>
           </div>
 
-          <!-- Camera Buttons -->
-          <div class="flex items-center space-x-3">
-            <button onclick="openCameraModal()" type="button" class="py-2 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center justify-center space-x-1.5 transition">
-              <i class="ph-bold ph-webcam text-indigo-600"></i>
-              <span>Use Live Camera</span>
-            </button>
-            <button onclick="analyzeFridgeAI()" type="button" class="py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 transition shadow-sm">
-              <i class="ph-bold ph-scan"></i>
-              <span>Scan Photo with Gemini AI</span>
+          <!-- Optional Context Notes & Action -->
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center pt-1">
+            <div class="sm:col-span-8">
+              <input type="text" id="photoNotesInput" placeholder="Optional notes for AI: e.g. &quot;Items in glass bowl on top shelf are Indian dal&quot;" class="w-full text-xs p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            </div>
+            <div class="sm:col-span-4">
+              <button id="btnScanPhoto" onclick="scanFridgePhotoAI()" type="button" class="w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center justify-center space-x-2 transition shadow-md cursor-pointer">
+                <i class="ph-bold ph-scan text-base"></i>
+                <span>Scan Photo into Real Food</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================================== -->
+        <!-- MODE 3: RAPID TYPE / PASTE            -->
+        <!-- ===================================== -->
+        <div id="panelType" class="hidden space-y-3">
+          <p class="text-xs text-slate-500">
+            Type or paste your food items separated by newlines, commas, or bullet points. Include weights (e.g. 250g, 1 kg) or cooked/raw descriptors.
+          </p>
+          <textarea id="typedItemsInput" rows="4" placeholder="e.g.&#10;Cooked Indian Daal 250 gms&#10;Raw Chicken breasts 1 Kilogram&#10;Indian curd around 500 grams&#10;Leftover vegetable biryani 2 bowls&#10;Frozen peas 1 pack in freezer" class="w-full text-xs sm:text-sm p-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none transition leading-relaxed"></textarea>
+          
+          <div class="flex justify-end pt-1">
+            <button onclick="processTypedItems()" type="button" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center space-x-2 transition shadow-md cursor-pointer">
+              <i class="ph-bold ph-plus-circle text-lg"></i>
+              <span>Document Typed Items</span>
             </button>
           </div>
         </div>
 
       </div>
+    </div>
 
-      <!-- INVENTORY LIST SECTION -->
-      <div class="bg-white p-5 rounded-2xl border border-slate-200 card-shadow space-y-4">
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          <div>
-            <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
-              <span>Fridge Inventory</span>
-              <span id="inventoryCountBadge" class="text-xs bg-slate-100 text-slate-700 font-semibold px-2 py-0.5 rounded-full">0 items</span>
-            </h3>
-            <p class="text-xs text-slate-500">Edit quantities, categories, or urgency before generating your meal plan.</p>
-          </div>
-          
-          <!-- Filter & Action Buttons -->
-          <div class="flex items-center space-x-2 text-xs">
-            <button onclick="filterInventory('all')" id="filterAll" class="px-2.5 py-1 rounded-md font-semibold bg-slate-900 text-white">All</button>
-            <button onclick="filterInventory('cooked_leftover')" id="filterLeftovers" class="px-2.5 py-1 rounded-md font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Cooked Leftovers 🚨</button>
-            <button onclick="filterInventory('raw_ingredient')" id="filterRaw" class="px-2.5 py-1 rounded-md font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Raw Ingredients 🥦</button>
-            <button onclick="clearAllFridgeItems()" class="px-2.5 py-1 rounded-md font-semibold bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 flex items-center space-x-1 transition ml-2" title="Wipe all items to start with an empty fridge">
-              <i class="ph-bold ph-trash"></i>
-              <span>Clear Fridge</span>
-            </button>
-          </div>
+
+    <!-- ========================================== -->
+    <!-- 2. DOCUMENTED FOOD INVENTORY (THE FRIDGE)  -->
+    <!-- ========================================== -->
+    <div class="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 card-shadow space-y-4">
+      
+      <!-- Top Section: Title & Actions -->
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-slate-900 flex items-center space-x-2">
+            <span>Documented Food in Fridge & Freezer</span>
+            <span id="inventoryCountBadge" class="text-xs bg-slate-100 text-slate-800 font-bold px-2.5 py-0.5 rounded-full">0 items</span>
+          </h2>
+          <p class="text-xs text-slate-500">Click any badge to toggle category (Cooked/Raw), compartment (Fridge/Freezer), or urgency.</p>
         </div>
 
-        <!-- Inventory Items Grid -->
-        <div id="inventoryContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <!-- Injected via JavaScript -->
-        </div>
-
-        <div id="emptyInventoryMsg" class="hidden text-center py-10 text-slate-400 space-y-2">
-          <i class="ph ph-empty text-4xl"></i>
-          <p class="text-sm">No items in your fridge inventory yet. Upload a photo or click "Quick Sample Fridge".</p>
-        </div>
-
-        <!-- Bottom Action -->
-        <div class="flex justify-between items-center pt-4 border-t border-slate-100">
-          <button onclick="switchTab('members')" class="text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center space-x-1">
-            <i class="ph-bold ph-arrow-left"></i>
-            <span>Back to Members</span>
+        <!-- Inventory Global Actions -->
+        <div class="flex items-center space-x-2 flex-wrap">
+          <button onclick="copyFoodListWhatsApp()" type="button" class="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center space-x-1.5 transition shadow-2xs cursor-pointer" title="Copy full list to share with family">
+            <i class="ph-bold ph-share-network text-emerald-600"></i>
+            <span>Share List</span>
           </button>
-          <button onclick="generatePlanTrigger()" class="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center space-x-2 transition shadow-md">
-            <i class="ph-bold ph-sparkle text-lg"></i>
-            <span>Generate 7-Day Meal Plan</span>
+          <button onclick="clearAllFridgeItems()" type="button" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 flex items-center space-x-1 transition cursor-pointer" title="Wipe all items to start fresh">
+            <i class="ph-bold ph-trash"></i>
+            <span>Clear All</span>
           </button>
+        </div>
+      </div>
+
+      <!-- Search & Filters Toolbar -->
+      <div class="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        <!-- Search input -->
+        <div class="relative flex-1 max-w-md">
+          <i class="ph-bold ph-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-sm"></i>
+          <input type="text" id="inventorySearchInput" oninput="filterAndSearchInventory()" placeholder="Search food (e.g. daal, chicken, curd, cheese)..." class="w-full pl-9 pr-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+        </div>
+
+        <!-- Filter Buttons -->
+        <div class="flex items-center space-x-1.5 text-xs overflow-x-auto pb-1 md:pb-0">
+          <button onclick="filterInventory('all')" id="filterAll" class="px-3 py-1.5 rounded-lg font-bold bg-slate-900 text-white transition">All Items</button>
+          <button onclick="filterInventory('fridge')" id="filterFridge" class="px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">Fridge 🧊</button>
+          <button onclick="filterInventory('freezer')" id="filterFreezer" class="px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">Freezer ❄️</button>
+          <button onclick="filterInventory('cooked_leftover')" id="filterLeftovers" class="px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">Leftovers 🚨</button>
+          <button onclick="filterInventory('raw_ingredient')" id="filterRaw" class="px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">Raw 🥦</button>
+        </div>
+      </div>
+
+      <!-- Inventory Items Grid -->
+      <div id="inventoryContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+        <!-- Injected via JavaScript -->
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyInventoryMsg" class="text-center py-12 text-slate-400 space-y-3">
+        <div class="w-14 h-14 mx-auto rounded-2xl bg-slate-100 flex items-center justify-center text-3xl text-slate-400">
+          <i class="ph ph-shopping-bag"></i>
+        </div>
+        <div>
+          <p class="text-sm font-bold text-slate-700">No food documented in your fridge or freezer yet</p>
+          <p class="text-xs text-slate-400 mt-0.5">Tap the microphone above to speak multiple items, snap a photo, or click "Demo Items".</p>
         </div>
       </div>
 
@@ -313,176 +320,31 @@
 
 
     <!-- ========================================== -->
-    <!-- TAB 3: 7-DAY MEAL PLAN                     -->
+    <!-- 3. OPTIONAL 1-CLICK MEAL PLANNER BANNER    -->
     <!-- ========================================== -->
-    <div id="tabContentPlan" class="tab-content space-y-6">
-      
-      <!-- Meal Plan Settings & Actions Bar -->
-      <div class="bg-white p-5 rounded-2xl border border-slate-200 card-shadow space-y-4">
-        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div>
-            <h2 class="text-lg font-bold text-slate-900 flex items-center space-x-2">
-              <i class="ph-bold ph-calendar-star text-emerald-600"></i>
-              <span>7-Day Personalized Meal Plan</span>
-            </h2>
-            <p class="text-xs text-slate-500 mt-0.5">Leftovers are prioritized on early days to avoid waste; raw ingredients are turned into customized, portion-controlled meals.</p>
-          </div>
-
-          <div class="flex items-center space-x-2.5 no-print">
-            <button onclick="openShoppingListModal()" class="text-xs font-semibold px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center space-x-1.5">
-              <i class="ph-bold ph-shopping-bag"></i>
-              <span>Shopping List</span>
-            </button>
-            <button onclick="window.print()" class="text-xs font-semibold px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition flex items-center space-x-1.5">
-              <i class="ph-bold ph-printer"></i>
-              <span>Print Plan</span>
-            </button>
-            <button id="btnRegeneratePlan" onclick="generatePlanTrigger()" class="text-xs font-semibold px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center space-x-1.5 shadow-sm">
-              <i class="ph-bold ph-arrows-clockwise"></i>
-              <span>Regenerate Plan</span>
-            </button>
-          </div>
+    <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 rounded-2xl shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div class="space-y-1 max-w-xl">
+        <div class="flex items-center space-x-2">
+          <span class="px-2 py-0.5 bg-emerald-500 text-white text-[10px] font-bold rounded uppercase tracking-wider">Zero-Waste AI</span>
+          <h3 class="text-base font-bold">Want to turn this food into a 7-Day Meal Plan?</h3>
         </div>
-
-        <!-- Meal planner options -->
-        <div class="flex flex-wrap items-center gap-4 pt-2 border-t border-slate-100 text-xs text-slate-600 no-print">
-          <label class="flex items-center space-x-2 cursor-pointer">
-            <input type="checkbox" id="chkAllowRepeats" checked class="rounded text-emerald-600 focus:ring-emerald-500">
-            <span class="font-medium">Allow Meal Repeats / Batch Cooking (Recommended)</span>
-          </label>
-          <span class="text-slate-300">|</span>
-          <div class="flex items-center space-x-2">
-            <span class="font-medium text-slate-700">Start Date:</span>
-            <input type="date" id="planStartDateInput" onchange="updateStartWeekdayLabel()" class="border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold bg-slate-50 text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm cursor-pointer">
-            <button type="button" onclick="setPlanDateToToday()" title="Reset to today's date" class="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition">
-              Today
-            </button>
-            <span id="resolvedStartWeekday" class="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full"></span>
-          </div>
-        </div>
+        <p class="text-xs text-slate-300">
+          Prioritizes your cooked leftovers on Day 1 & Day 2 to prevent spoilage, pairs raw ingredients into delicious family dinners, and generates a grocery shopping list.
+        </p>
       </div>
 
-      <!-- Priority Callout (Leftovers & Safety Verification) -->
-      <div id="planSummaryBox" class="hidden bg-emerald-50 border border-emerald-200 p-4 rounded-xl space-y-2">
-        <div class="flex items-center space-x-2 text-emerald-900 font-bold text-sm">
-          <i class="ph-bold ph-shield-check text-lg text-emerald-600"></i>
-          <span id="planDietaryVerificationText">All household dietary requirements verified & satisfied.</span>
-        </div>
-        <div id="wasteTipsContainer" class="text-xs text-emerald-800 space-y-1">
-          <!-- Injected waste reduction highlights -->
-        </div>
-      </div>
-
-      <!-- Plan Loading Indicator -->
-      <div id="planLoadingSpinner" class="hidden text-center py-16 space-y-3">
-        <div class="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-        <p class="text-sm font-semibold text-slate-700">Crafting your 7-day personalized meal plan...</p>
-        <p class="text-xs text-slate-400">Scheduling leftovers first, checking dietary constraints, and calculating member portions.</p>
-      </div>
-
-      <!-- 7-Day Plan Cards Container -->
-      <div id="planDaysContainer" class="space-y-6">
-        <!-- Injected via JavaScript -->
-      </div>
-
+      <button onclick="openMealPlanGeneratorModal()" type="button" class="w-full sm:w-auto px-5 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center space-x-2 shadow-lg transition active:scale-95 cursor-pointer whitespace-nowrap">
+        <i class="ph-bold ph-calendar-check text-lg"></i>
+        <span>Generate 7-Day Meal Plan ✨</span>
+      </button>
     </div>
 
   </main>
 
-  <!-- ========================================== -->
-  <!-- MODAL: ADD / EDIT HOUSEHOLD MEMBER         -->
-  <!-- ========================================== -->
-  <div id="memberModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-100 space-y-4">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 id="memberModalTitle" class="text-base font-bold text-slate-900">Add Household Member</h3>
-        <button onclick="closeMemberModal()" class="text-slate-400 hover:text-slate-600">
-          <i class="ph ph-x text-lg"></i>
-        </button>
-      </div>
-
-      <form id="memberForm" onsubmit="saveMember(event)" class="space-y-4 text-xs sm:text-sm">
-        <input type="hidden" id="memberFormId">
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div class="sm:col-span-2">
-            <label class="block font-semibold text-slate-700 mb-1">Name</label>
-            <input type="text" id="memberFormName" required placeholder="e.g. Anil" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-          </div>
-          <div>
-            <label class="block font-semibold text-slate-700 mb-1">Age</label>
-            <input type="number" id="memberFormAge" required min="1" max="120" value="30" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block font-semibold text-slate-700 mb-1">Sex</label>
-            <select id="memberFormSex" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-              <option value="Male">Male</option>
-              <option value="Female">Female</option>
-              <option value="Other">Other / Prefer not to say</option>
-            </select>
-          </div>
-          <div>
-            <label class="block font-semibold text-slate-700 mb-1">Activity Level</label>
-            <select id="memberFormActivity" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-              <option value="Moderate">Moderate</option>
-              <option value="Sedentary">Sedentary (Desk job)</option>
-              <option value="Active">Active / Athlete</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Meals Eaten Checkboxes -->
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Meals Eaten Daily</label>
-          <div class="flex flex-wrap gap-3 pt-1">
-            <label class="flex items-center space-x-1.5 cursor-pointer">
-              <input type="checkbox" name="mealEaten" value="Breakfast" checked class="rounded text-emerald-600">
-              <span>Breakfast</span>
-            </label>
-            <label class="flex items-center space-x-1.5 cursor-pointer">
-              <input type="checkbox" name="mealEaten" value="Lunch" checked class="rounded text-emerald-600">
-              <span>Lunch</span>
-            </label>
-            <label class="flex items-center space-x-1.5 cursor-pointer">
-              <input type="checkbox" name="mealEaten" value="Dinner" checked class="rounded text-emerald-600">
-              <span>Dinner</span>
-            </label>
-            <label class="flex items-center space-x-1.5 cursor-pointer">
-              <input type="checkbox" name="mealEaten" value="Snack" class="rounded text-emerald-600">
-              <span>Snack</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- Dietary Needs Chips -->
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="block font-semibold text-slate-700">Dietary & Cultural Preferences</label>
-            <span class="text-[11px] text-slate-400">Click to toggle</span>
-          </div>
-          <div class="flex flex-wrap gap-1.5 pt-1" id="dietaryChipsSelector">
-            <!-- Rendered by JS -->
-          </div>
-        </div>
-
-        <!-- Dislikes & Specific Notes -->
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Cuisine Style, Allergies & Dislikes</label>
-          <input type="text" id="memberFormNotes" placeholder="e.g. Only Indian meals, strictly no eggs, no pasta/western food, mild spice" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-          <p class="text-[11px] text-slate-400 mt-1">Specify cultural food rules (e.g. Traditional Indian only) or strict dislikes (e.g. no pasta, no eggs, no western food).</p>
-        </div>
-
-        <!-- Submit buttons -->
-        <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
-          <button type="button" onclick="closeMemberModal()" class="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium">Cancel</button>
-          <button type="submit" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm">Save Member</button>
-        </div>
-      </form>
-    </div>
-  </div>
+  <!-- FOOTER -->
+  <footer class="mt-auto py-6 border-t border-slate-200 bg-white text-center text-xs text-slate-400">
+    <p>SmartFridge AI &bull; Family Food Documenter & Zero-Waste Meal Planner &bull; Powered by Gemini 2.0 Flash</p>
+  </footer>
 
 
   <!-- ========================================== -->
@@ -491,7 +353,7 @@
   <div id="itemModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100 space-y-4">
       <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 id="itemModalTitle" class="text-base font-bold text-slate-900">Add Fridge Item</h3>
+        <h3 id="itemModalTitle" class="text-base font-bold text-slate-900">Add Fridge / Freezer Item</h3>
         <button onclick="closeItemModal()" class="text-slate-400 hover:text-slate-600">
           <i class="ph ph-x text-lg"></i>
         </button>
@@ -502,7 +364,7 @@
 
         <div>
           <label class="block font-semibold text-slate-700 mb-1">Item Name</label>
-          <input type="text" id="itemFormName" required placeholder="e.g. Leftover Bolognese or Raw Salmon" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          <input type="text" id="itemFormName" required placeholder="e.g. Cooked Indian Daal, Raw Chicken Breasts" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -514,19 +376,19 @@
             </select>
           </div>
           <div>
-            <label class="block font-semibold text-slate-700 mb-1">Urgency / Expiry</label>
-            <select id="itemFormUrgency" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-              <option value="high">High (Eat in 1-2 days)</option>
-              <option value="medium" selected>Medium (3-5 days)</option>
-              <option value="low">Low (Shelf-stable / Frozen)</option>
+            <label class="block font-semibold text-slate-700 mb-1">Storage Location</label>
+            <select id="itemFormStorage" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+              <option value="Fridge" selected>Fridge 🧊</option>
+              <option value="Freezer">Freezer ❄️</option>
+              <option value="Pantry">Pantry / Cupboard</option>
             </select>
           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block font-semibold text-slate-700 mb-1">Quantity / Weight</label>
-            <input type="text" id="itemFormQuantity" placeholder="e.g. 250 gms, 1 kg, 3 portions" value="2 portions" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            <label class="block font-semibold text-slate-700 mb-1">Weight / Quantity</label>
+            <input type="text" id="itemFormQuantity" placeholder="e.g. 250 gms, 1 kg, 500 grams" value="250 gms" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
           </div>
           <div>
             <label class="block font-semibold text-slate-700 mb-1">Estimated Portions</label>
@@ -535,17 +397,17 @@
         </div>
 
         <div>
-          <label class="block font-semibold text-slate-700 mb-1">Storage Location</label>
-          <select id="itemFormStorage" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-            <option value="Fridge" selected>Refrigerator</option>
-            <option value="Freezer">Freezer</option>
-            <option value="Pantry">Pantry / Cupboard</option>
+          <label class="block font-semibold text-slate-700 mb-1">Urgency / Expiry</label>
+          <select id="itemFormUrgency" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            <option value="high">High: Priority 1 (Eat in 1-2 days)</option>
+            <option value="medium" selected>Medium: Use in 3-5 days</option>
+            <option value="low">Low: Long shelf-life / Freezer</option>
           </select>
         </div>
 
         <div>
-          <label class="block font-semibold text-slate-700 mb-1">Notes / Preparation Tips (Optional)</label>
-          <input type="text" id="itemFormNotes" placeholder="e.g. Mild spice, gentle on stomach, in glass container" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          <label class="block font-semibold text-slate-700 mb-1">Notes / Details (Optional)</label>
+          <input type="text" id="itemFormNotes" placeholder="e.g. Glass Tupperware, mild spice, opened yesterday" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
         </div>
 
         <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
@@ -579,7 +441,7 @@
 
       <div class="flex items-center justify-between pt-2">
         <span class="text-xs text-slate-500">Point at fridge shelves or food containers</span>
-        <button onclick="captureSnapshot()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center space-x-2 shadow-sm">
+        <button onclick="captureSnapshot()" class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center space-x-2 shadow-sm cursor-pointer">
           <i class="ph-bold ph-camera text-base"></i>
           <span>Capture Photo</span>
         </button>
@@ -589,31 +451,148 @@
 
 
   <!-- ========================================== -->
-  <!-- MODAL: SHOPPING LIST                       -->
+  <!-- MODAL: 7-DAY MEAL PLAN GENERATOR           -->
   <!-- ========================================== -->
-  <div id="shoppingListModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100 space-y-4">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
-          <i class="ph-bold ph-shopping-cart text-indigo-600"></i>
-          <span>Weekly Grocery List</span>
-        </h3>
-        <button onclick="closeShoppingListModal()" class="text-slate-400 hover:text-slate-600">
+  <div id="mealPlanModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl border border-slate-100 space-y-5 my-8 max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+        <div class="flex items-center space-x-2">
+          <div class="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+            <i class="ph-bold ph-calendar-check"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900">7-Day Zero-Waste Meal Plan</h3>
+            <p class="text-xs text-slate-500">Built using your documented leftovers and raw fridge ingredients</p>
+          </div>
+        </div>
+        <button onclick="closeMealPlanModal()" class="text-slate-400 hover:text-slate-600">
           <i class="ph ph-x text-lg"></i>
         </button>
       </div>
 
-      <p class="text-xs text-slate-500">Minor staple ingredients needed to complete your weekly recipes.</p>
+      <!-- Controls: Starting Day & Preferences -->
+      <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3 shrink-0">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Plan Starting Date</label>
+            <input type="date" id="planStartDateInput" class="w-full text-xs p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Duration</label>
+            <select id="planDaysSelect" class="w-full text-xs p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+              <option value="7" selected>7 Days (Full Week)</option>
+              <option value="5">5 Days (Work Week)</option>
+              <option value="3">3 Days (Quick Run)</option>
+            </select>
+          </div>
+          <div class="flex items-end">
+            <button id="btnGeneratePlanSubmit" onclick="runGenerateMealPlan()" class="w-full py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center space-x-1.5 shadow-sm transition cursor-pointer">
+              <i class="ph-bold ph-sparkle"></i>
+              <span>Generate / Refresh</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
-      <ul id="shoppingListItems" class="space-y-2 max-h-64 overflow-y-auto pr-1 text-xs sm:text-sm">
+      <!-- Meal Plan Render Area -->
+      <div id="mealPlanResultsContainer" class="flex-1 overflow-y-auto space-y-4 pr-1">
         <!-- Rendered by JS -->
-      </ul>
+      </div>
 
-      <div class="flex justify-end pt-3 border-t border-slate-100">
-        <button onclick="copyShoppingList()" class="px-4 py-2 rounded-lg bg-slate-900 hover:bg-black text-white font-medium text-xs flex items-center space-x-1.5">
-          <i class="ph-bold ph-copy"></i>
-          <span>Copy to Clipboard</span>
+      <!-- Bottom Actions -->
+      <div class="flex items-center justify-between pt-3 border-t border-slate-100 shrink-0">
+        <button onclick="window.print()" class="text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center space-x-1">
+          <i class="ph-bold ph-printer"></i>
+          <span>Print Weekly Plan</span>
         </button>
+        <button onclick="closeMealPlanModal()" class="px-5 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold transition">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ========================================== -->
+  <!-- MODAL: FAMILY PROFILE & PIN SETTINGS       -->
+  <!-- ========================================== -->
+  <div id="familyModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
+          <i class="ph-bold ph-house-line text-emerald-600"></i>
+          <span>Family Profile Settings</span>
+        </h3>
+        <button onclick="closeFamilyModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="ph ph-x text-lg"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs sm:text-sm">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Active Family Name</label>
+          <input type="text" id="familyProfileNameInput" placeholder="e.g. Dutta Family" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+        </div>
+
+        <div class="pt-2 border-t border-slate-100 space-y-2">
+          <label class="flex items-center space-x-2 cursor-pointer select-none">
+            <input type="checkbox" id="chkFamilyPinRequired" onchange="togglePinInputVisibility()" class="rounded text-emerald-600 focus:ring-emerald-500">
+            <span class="font-semibold text-slate-700">Protect this profile with a 4-digit PIN</span>
+          </label>
+
+          <div id="pinEntryFields" class="hidden space-y-2 pt-1">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-0.5">PIN Code</label>
+                <input type="password" id="familyPinInput" maxlength="4" placeholder="4 digits" class="w-full p-2 border border-slate-200 rounded-lg text-center tracking-widest font-mono">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-0.5">Confirm PIN</label>
+                <input type="password" id="familyPinConfirmInput" maxlength="4" placeholder="4 digits" class="w-full p-2 border border-slate-200 rounded-lg text-center tracking-widest font-mono">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Saved Profiles List -->
+        <div class="pt-2 border-t border-slate-100 space-y-2">
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider">Switch Family Profile</label>
+          <div id="savedFamiliesList" class="space-y-1.5 max-h-36 overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+
+      <div class="flex justify-between items-center pt-3 border-t border-slate-100">
+        <button onclick="createNewFamilyProfilePrompt()" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+          + New Family Profile
+        </button>
+        <button onclick="saveFamilyProfileSettings()" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm">
+          Save Profile
+        </button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ========================================== -->
+  <!-- MODAL: PIN UNLOCK MODAL                    -->
+  <!-- ========================================== -->
+  <div id="pinUnlockModal" class="hidden fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
+      <div class="w-12 h-12 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-2xl mx-auto shadow-sm">
+        <i class="ph-bold ph-lock-key"></i>
+      </div>
+      <div>
+        <h3 class="text-base font-bold text-slate-900">Enter Family PIN</h3>
+        <p id="pinUnlockPromptText" class="text-xs text-slate-500 mt-1">This profile is PIN protected.</p>
+      </div>
+
+      <div class="flex justify-center py-2">
+        <input type="password" id="unlockPinInput" maxlength="4" placeholder="&bull;&bull;&bull;&bull;" class="w-36 text-center text-2xl tracking-[0.5em] font-mono p-2.5 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+      </div>
+
+      <div class="flex space-x-2 pt-2">
+        <button onclick="closePinUnlockModal()" class="flex-1 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-semibold hover:bg-slate-50">Cancel</button>
+        <button onclick="verifyAndUnlockPin()" class="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm">Unlock Profile</button>
       </div>
     </div>
   </div>
@@ -627,7 +606,7 @@
       <div class="flex items-center justify-between pb-3 border-b border-slate-100">
         <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
           <i class="ph-bold ph-key text-amber-500"></i>
-          <span>Gemini API Key Settings</span>
+          <span>Gemini 2.0 Flash Vision AI</span>
         </h3>
         <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-slate-600">
           <i class="ph ph-x text-lg"></i>
@@ -635,181 +614,28 @@
       </div>
 
       <div class="text-xs text-slate-600 space-y-2">
-        <p>You can use a free Google Gemini API key to enable live Gemini 2.5 Flash multimodal vision analysis and meal planning.</p>
-        <p class="text-slate-400">Get a free key from <a href="https://aistudio.google.com/" target="_blank" class="text-indigo-600 underline">Google AI Studio</a>.</p>
+        <p>Enter a free Google Gemini API key to enable live high-precision computer vision analysis of your fridge & freezer photos and deep voice extraction.</p>
+        <p class="text-slate-400">Get a free key instantly from <a href="https://aistudio.google.com/" target="_blank" class="text-indigo-600 underline font-semibold">Google AI Studio</a>.</p>
       </div>
 
       <div class="space-y-1.5">
         <label class="block text-xs font-semibold text-slate-700">Gemini API Key</label>
         <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy..." class="w-full p-2.5 border border-slate-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-        <p class="text-[11px] text-slate-400">Stored safely in your browser local storage.</p>
+        <p class="text-[11px] text-slate-400">Stored safely only in your local browser storage.</p>
       </div>
 
       <div class="flex justify-between items-center pt-3 border-t border-slate-100">
-        <button onclick="clearApiKey()" class="text-xs text-red-600 hover:underline">Clear Key</button>
-        <div class="space-x-2">
-          <button onclick="closeSettingsModal()" class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-medium">Cancel</button>
-          <button onclick="saveApiKey()" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm">Save Key</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ========================================== -->
-  <!-- MODAL: FAMILY PROFILE & PIN SETTINGS       -->
-  <!-- ========================================== -->
-  <div id="familyModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100 space-y-4">
-      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
-          <i class="ph-bold ph-house-line text-emerald-600"></i>
-          <span>Family Profile & PIN</span>
-        </h3>
-        <button onclick="closeFamilyModal()" class="text-slate-400 hover:text-slate-600">
-          <i class="ph ph-x text-lg"></i>
+        <button onclick="testGeminiApiKey()" class="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+          Test Connection
+        </button>
+        <button onclick="saveGeminiApiKey()" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm">
+          Save Key
         </button>
       </div>
-
-      <!-- Tabs inside Family Modal: Profile & PIN / Switch Family / Backup -->
-      <div class="flex border-b border-slate-200 text-xs font-semibold">
-        <button id="familySubTabProfile" onclick="switchFamilySubTab('profile')" class="pb-2 px-3 border-b-2 border-emerald-500 text-emerald-700">Settings & PIN</button>
-        <button id="familySubTabSwitch" onclick="switchFamilySubTab('switch')" class="pb-2 px-3 border-b-2 border-transparent text-slate-500 hover:text-slate-700">Switch Family</button>
-        <button id="familySubTabBackup" onclick="switchFamilySubTab('backup')" class="pb-2 px-3 border-b-2 border-transparent text-slate-500 hover:text-slate-700">Backup & Export</button>
-      </div>
-
-      <!-- Panel 1: Profile & PIN -->
-      <div id="familyPanelProfile" class="space-y-4 text-xs sm:text-sm">
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Family Profile Name</label>
-          <input type="text" id="familyProfileNameInput" placeholder="e.g. Dutta Family" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-          <p class="text-[11px] text-slate-400 mt-1">All members, fridge inventory, and meal plans are saved under this family name.</p>
-        </div>
-
-        <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
-          <div class="flex items-center justify-between">
-            <div>
-              <span class="font-bold text-slate-800">4-Digit Security PIN</span>
-              <p class="text-[11px] text-slate-500">Require PIN to open and view this family profile when logging in</p>
-            </div>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" id="chkFamilyPinRequired" onchange="togglePinInputVisibility()" class="sr-only peer">
-              <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
-            </label>
-          </div>
-
-          <div id="pinEntryFields" class="space-y-2 hidden pt-2 border-t border-slate-200">
-            <div class="grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Set 4-Digit PIN</label>
-                <input type="password" id="familyPinInput" maxlength="6" placeholder="e.g. 1234" class="w-full p-2 border border-slate-300 rounded-lg text-center font-mono tracking-widest text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-              </div>
-              <div>
-                <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Confirm PIN</label>
-                <input type="password" id="familyPinConfirmInput" maxlength="6" placeholder="e.g. 1234" class="w-full p-2 border border-slate-300 rounded-lg text-center font-mono tracking-widest text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-              </div>
-            </div>
-            <p class="text-[11px] text-amber-700 flex items-center space-x-1">
-              <i class="ph-bold ph-lock-key"></i>
-              <span>Keep your PIN safe. It will be required whenever you open this family profile.</span>
-            </p>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-between pt-2">
-          <button type="button" onclick="lockActiveFamilyNow()" id="btnLockActiveFamily" class="text-xs text-amber-700 hover:text-amber-800 font-semibold flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50">
-            <i class="ph-bold ph-lock"></i>
-            <span>Lock Profile Now</span>
-          </button>
-          <button type="button" onclick="saveFamilyProfileSettings()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm">
-            Save Profile
-          </button>
-        </div>
-      </div>
-
-      <!-- Panel 2: Switch / Create Family -->
-      <div id="familyPanelSwitch" class="hidden space-y-3 text-xs sm:text-sm">
-        <div>
-          <label class="block font-semibold text-slate-700 mb-1">Saved Family Profiles on this Device</label>
-          <div id="savedFamiliesList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
-            <!-- Rendered by JS -->
-          </div>
-        </div>
-
-        <div class="pt-3 border-t border-slate-100 space-y-2">
-          <label class="block font-semibold text-slate-700">Create New Family Profile</label>
-          <div class="flex items-center space-x-2">
-            <input type="text" id="newFamilyNameInput" placeholder="New family name (e.g. Dutta Family 2)" class="flex-1 p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none text-xs">
-            <button onclick="createNewFamilyProfileTrigger()" class="px-3 py-2 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-semibold whitespace-nowrap">
-              + Create
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Panel 3: Backup & Export -->
-      <div id="familyPanelBackup" class="hidden space-y-3 text-xs sm:text-sm">
-        <p class="text-xs text-slate-500 leading-relaxed">
-          Download a backup file of your family members, fridge inventory, and weekly meal plan, or import an existing backup.
-        </p>
-        <div class="grid grid-cols-2 gap-3 pt-2">
-          <button onclick="exportFamilyBackupJSON()" class="p-3 rounded-xl border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center space-y-1 text-center transition">
-            <i class="ph-bold ph-download-simple text-2xl text-emerald-600"></i>
-            <span class="font-bold text-xs text-slate-800">Export Backup</span>
-            <span class="text-[10px] text-slate-400">Save as JSON file</span>
-          </button>
-          <label class="p-3 rounded-xl border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center space-y-1 text-center cursor-pointer transition">
-            <i class="ph-bold ph-upload-simple text-2xl text-indigo-600"></i>
-            <span class="font-bold text-xs text-slate-800">Import Backup</span>
-            <span class="text-[10px] text-slate-400">Load JSON file</span>
-            <input type="file" accept=".json" onchange="importFamilyBackupJSON(event)" class="hidden">
-          </label>
-        </div>
-      </div>
-
     </div>
   </div>
 
-  <!-- ========================================== -->
-  <!-- MODAL: PIN UNLOCK ON LOGON                 -->
-  <!-- ========================================== -->
-  <div id="pinUnlockModal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center space-y-5">
-      <div class="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center text-3xl mx-auto shadow-inner">
-        <i class="ph-bold ph-lock-key"></i>
-      </div>
-
-      <div class="space-y-1">
-        <h3 class="text-lg font-bold text-slate-900" id="pinUnlockFamilyName">Dutta Family</h3>
-        <p class="text-xs text-slate-500">This profile is PIN protected. Enter your 4-digit PIN to access your meal plan & fridge.</p>
-      </div>
-
-      <div class="space-y-3">
-        <div class="flex justify-center">
-          <input type="password" id="pinUnlockInput" maxlength="6" autofocus placeholder="••••" class="w-40 text-center text-2xl tracking-[0.5em] font-mono p-3 border-2 border-emerald-500 rounded-xl focus:outline-none focus:ring-4 focus:ring-emerald-100 text-slate-900">
-        </div>
-        <p id="pinUnlockErrorMsg" class="hidden text-xs text-red-600 font-semibold"></p>
-
-        <button onclick="submitPinUnlock()" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition">
-          Unlock Profile
-        </button>
-      </div>
-
-      <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-        <button onclick="switchFamilyFromUnlockModal()" class="hover:text-emerald-700 font-medium">Switch Family</button>
-        <button onclick="resetPinPrompt()" class="text-slate-400 hover:text-slate-600">Forgot PIN?</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- FOOTER -->
-  <footer class="mt-auto border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400 no-print">
-    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-      <span>SmartFridge AI &copy; 2026 &bull; Personalized Dietary Household Meal Planner</span>
-      <span>Prioritizing Food Preservation &bull; Zero Waste Cooking</span>
-    </div>
-  </footer>
-
-  <!-- Application Logic -->
+  <!-- App Script -->
   <script src="app.js"></script>
 </body>
 </html>
