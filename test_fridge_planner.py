@@ -219,6 +219,40 @@ def test_parse_voice_endpoint():
     assert freezer_item["storage_type"] == "Freezer"
     print(f"[OK] Multi-item voice dictation endpoint verified: {len(items)} items documented into Fridge and Freezer!")
 
+def test_continuous_stream_voice_dictation():
+    # Test unpunctuated continuous speech: "1 kg of courgette 250 grams of cabbage 250 grams of cauliflower"
+    raw_speech = "1 kg of courgette 250 grams of cabbage 250 grams of cauliflower"
+    res = client.post("/api/parse-voice", json={"voice_transcript": raw_speech})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    items = data["items"]
+    assert len(items) == 3, f"Expected exactly 3 items, got {len(items)}: {items}"
+    
+    names = [i["name"] for i in items]
+    assert "Courgette" in names, f"Expected 'Courgette' in {names}"
+    assert "Cabbage" in names, f"Expected 'Cabbage' in {names}"
+    assert "Cauliflower" in names, f"Expected 'Cauliflower' in {names}"
+    
+    # Verify no 'of' prefix remains
+    for name in names:
+        assert not name.lower().startswith("of "), f"Item name '{name}' should not start with 'of'"
+        
+    # Verify quantities
+    courgette = next(i for i in items if i["name"] == "Courgette")
+    assert "1" in courgette["quantity"] and "kg" in courgette["quantity"]
+    assert courgette["category"] == "raw_ingredient"
+    
+    cabbage = next(i for i in items if i["name"] == "Cabbage")
+    assert "250" in cabbage["quantity"]
+    assert cabbage["category"] == "raw_ingredient"
+    
+    cauliflower = next(i for i in items if i["name"] == "Cauliflower")
+    assert "250" in cauliflower["quantity"]
+    assert cauliflower["category"] == "raw_ingredient"
+    
+    print("[OK] Continuous unpunctuated voice dictation verified: Courgette (1kg), Cabbage (250g), Cauliflower (250g) documented cleanly without 'of' prefixes!")
+
 def test_analyze_video_frames_endpoint():
     # 1x1 transparent/black JPEG data url
     dummy_frame = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
@@ -254,6 +288,7 @@ if __name__ == "__main__":
         test_analyze_fridge_fallback()
         test_spoken_or_typed_items_nlp()
         test_parse_voice_endpoint()
+        test_continuous_stream_voice_dictation()
         test_analyze_video_frames_endpoint()
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()

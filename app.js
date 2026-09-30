@@ -1037,34 +1037,51 @@ Output ONLY valid JSON:
 function parseSpokenOrTypedItems(rawText) {
   if (!rawText || !rawText.trim()) return [];
 
-  const rawSegments = rawText
-    .split(/\n+|\r+|\.{2,}|,|;|\b(?:and\s+then|and\s+also)\b|[•\*\-]\s+/gi)
-    .map(s => s.trim())
-    .filter(s => s.length > 1);
+  const text = rawText.replace(/\s+/g, " ").trim();
+  const unitWords = "(?:kilograms?|kilos?|kgs?|kg|grams?|gms?|gm|g|milliliters?|ml|liters?|litres?|l|packs?|packets?|bags?|cans?|tubs?|boxes?|pieces?|pcs?|eggs?|portions?|servings?|bowls?)";
+  const qtyPrefix = "(?:around|approx|about)?\\s*(?:\\d+(?:\\.\\d+)?\\s*" + unitWords + "|(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|half\\s+(?:a\\s+)?)\\s*(?:kg|kilo|pack|packs|bag|bags|box|boxes|tub|tubs|can|cans|bottle|bottles|litre|liter|piece|pieces|bowl|bowls))\\b";
 
-  const refinedSegments = [];
-  rawSegments.forEach(seg => {
-    const andParts = seg.split(/\s+and\s+/i);
-    if (andParts.length > 1) {
-      andParts.forEach(p => {
-        if (p.trim()) refinedSegments.push(p.trim());
-      });
-    } else {
-      refinedSegments.push(seg);
-    }
+  const rawChunks = text.split(/[\n\r]+|\.{2,}|,|;|\b(?:and\s+then|and\s+also)\b|[•\*\-]\s+/gi);
+  const refined = [];
+
+  rawChunks.forEach(chunk => {
+    chunk = chunk.trim();
+    if (!chunk) return;
+
+    const andParts = chunk.split(/\s+and\s+(?!(?:cheese|chips|rice|dal|daal)\b)/i);
+    andParts.forEach(part => {
+      part = part.trim();
+      if (!part) return;
+
+      const startsWithQty = new RegExp("^(?:" + qtyPrefix + ")", "i").test(part);
+
+      if (startsWithQty) {
+        // [QTY] [FOOD] [QTY] [FOOD]... (e.g. 1 kg of courgette 250 grams of cabbage)
+        const inserted = part.replace(new RegExp("([a-zA-Z\\)])\\s+(?=" + qtyPrefix + ")", "gi"), (m, p1) => p1 + "\n");
+        inserted.split("\n").forEach(line => {
+          if (line.trim()) refined.push(line.trim());
+        });
+      } else {
+        // [FOOD] [QTY] [FOOD] [QTY]... (e.g. cooked daal 250 gms raw chicken 1 kg)
+        const inserted = part.replace(new RegExp("(\\b\\d+(?:\\.\\d+)?\\s*" + unitWords + ")\\s+(?=[a-zA-Z](?!of\\b))", "gi"), (m, p1) => p1 + "\n");
+        inserted.split("\n").forEach(line => {
+          if (line.trim()) refined.push(line.trim());
+        });
+      }
+    });
   });
 
   const parsedItems = [];
   const now = Date.now();
 
-  refinedSegments.forEach((text, idx) => {
-    const lower = text.toLowerCase();
+  refined.forEach((itemText, idx) => {
+    const lower = itemText.toLowerCase();
 
     // 1. Storage location
     let storageType = "Fridge";
-    if (/\b(?:freezer|frozen|deep\s*freeze|in\s*freezer)\b/i.test(text)) {
+    if (/\b(?:freezer|frozen|deep\s*freeze|in\s*freezer)\b/i.test(itemText)) {
       storageType = "Freezer";
-    } else if (/\b(?:pantry|cupboard|shelf)\b/i.test(text)) {
+    } else if (/\b(?:pantry|cupboard|shelf)\b/i.test(itemText)) {
       storageType = "Pantry";
     }
 
@@ -1076,7 +1093,7 @@ function parseSpokenOrTypedItems(rawText) {
       "stirfry", "tikka", "masala", "korma", "chilli", "takeout", "takeaway", "bolognese"
     ];
     
-    const hasRawWord = /\b(?:raw|uncooked|fresh)\b/i.test(text);
+    const hasRawWord = /\b(?:raw|uncooked|fresh)\b/i.test(itemText);
     const hasCookedWord = cookedKeywords.some(kw => lower.includes(kw));
 
     let category = "raw_ingredient";
@@ -1090,12 +1107,12 @@ function parseSpokenOrTypedItems(rawText) {
     let quantity = "1 portion";
     let portions = 2.0;
 
-    const gramMatch = text.match(/(?:around|approx|about)?\s*(\d+(?:\.\d+)?)\s*(?:gms|gm|grams|gram|g)\b/i);
-    const kgMatch = text.match(/(?:around|approx|about)?\s*(\d+(?:\.\d+)?)\s*(?:kilograms|kilogram|kilos|kilo|kgs|kg)\b/i);
-    const mlMatch = text.match(/(?:around|approx|about)?\s*(\d+(?:\.\d+)?)\s*(?:ml|milliliters)\b/i);
-    const literMatch = text.match(/(?:around|approx|about)?\s*(\d+(?:\.\d+)?)\s*(?:liters|litres|l)\b/i);
-    const portionMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:portions|portion|servings|serving|bowls|bowl)\b/i);
-    const countMatch = text.match(/(\d+)\s*(?:pieces|piece|pcs|pack|packs|packet|packets|bags|bag|cans|can|eggs|breasts|fillets|tubs|pots|boxes)\b/i);
+    const gramMatch = itemText.match(/(?:around|approx|about)?\s*(\d+(?:\.\d+)?)\s*(?:gms?|grams?|gm|g)\b/i);
+    const kgMatch = itemText.match(/(?:around|approx|about)?\s*(\d+(?:\.\d+)?)\s*(?:kilograms?|kilogram|kilos?|kilo|kgs?|kg)\b/i);
+    const mlMatch = itemText.match(/(?:around|approx|about)?\s*(\d+(?:\.\d+)?)\s*(?:ml|milliliters)\b/i);
+    const literMatch = itemText.match(/(?:around|approx|about)?\s*(\d+(?:\.\d+)?)\s*(?:liters?|litres?|l)\b/i);
+    const portionMatch = itemText.match(/(\d+(?:\.\d+)?)\s*(?:portions?|portion|servings?|serving|bowls?|bowl)\b/i);
+    const countMatch = itemText.match(/(\d+)\s*(?:pieces?|piece|pcs?|packs?|pack|packet|packets|bags?|bag|cans?|can|eggs?|breasts?|fillets?|tubs?|pots?|boxes?)\b/i);
 
     if (kgMatch) {
       const kgVal = parseFloat(kgMatch[1]);
@@ -1123,7 +1140,7 @@ function parseSpokenOrTypedItems(rawText) {
       quantity = countMatch[0].trim();
       const countNum = parseInt(countMatch[1], 10);
       portions = Math.max(1, Math.round(countNum / 2));
-    } else if (/\bhalf\s*(?:a\s*)?(?:kilo|kg)\b/i.test(text)) {
+    } else if (/\bhalf\s*(?:a\s*)?(?:kilo|kg)\b/i.test(itemText)) {
       quantity = "500 gms";
       portions = 2.5;
     }
@@ -1143,19 +1160,24 @@ function parseSpokenOrTypedItems(rawText) {
     }
 
     // 5. Clean name
-    let cleanName = text
+    let cleanName = itemText
       .replace(/\b(?:in\s+the\s+freezer|in\s+freezer|in\s+the\s+fridge|in\s+fridge)\b/gi, "")
-      .replace(/\b(?:around|approx|about|approx\.)\s+\d+(?:\.\d+)?\s*(?:gms|gm|grams|gram|g|kg|kgs|kilos|kilograms|ml|l|litres|liters)\b/gi, "")
-      .replace(/\b\d+(?:\.\d+)?\s*(?:gms|gm|grams|gram|g|kg|kgs|kilos|kilograms|ml|l|litres|liters)\b/gi, "")
-      .replace(/\b\d+\s*(?:portions|portion|servings|serving|bowls|bowl|pieces|piece|pcs|pack|packs|packet|packets|bags|bag|cans|can|tubs|boxes)\b/gi, "")
+      .replace(/\b(?:around|approx|about|approx\.)\s+\d+(?:\.\d+)?\s*(?:gms?|grams?|gm|g|kg|kgs?|kilos?|kilograms?|ml|l|litres?|liters?)\b/gi, "")
+      .replace(/\b\d+(?:\.\d+)?\s*(?:gms?|grams?|gm|g|kg|kgs?|kilos?|kilograms?|ml|l|litres?|liters?)\b/gi, "")
+      .replace(/\b\d+\s*(?:portions?|portion|servings?|serving|bowls?|bowl|pieces?|piece|pcs?|packs?|pack|packet|packets|bags?|bag|cans?|can|tubs?|boxes?)\b/gi, "")
+      .replace(/\b(?:a|an|one|two|three|four|five|six|half\s+a)\s+(?:kilo|kg|pack|bag|box|tub|can|bottle|litre|liter|piece)\b/gi, "")
+      .replace(/^[\s]*(?:of|some|a|an|the|and)\s+/gi, "")
+      .replace(/\s+(?:of|in|at)\s*$/gi, "")
       .replace(/[\(\)\[\]\{\}]/g, "")
       .replace(/\s{2,}/g, " ")
       .trim();
 
+    cleanName = cleanName.replace(/^of\s+/i, "").trim();
+
     if (cleanName.length > 0) {
       cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
     } else {
-      cleanName = text.trim();
+      cleanName = itemText.trim();
     }
 
     let notes = category === "cooked_leftover"
@@ -1247,25 +1269,27 @@ A family member dictated multiple food items stored in their fridge or freezer i
 "${transcript}"
 
 Task: Separate and document EVERY distinct food item mentioned into valid JSON.
-Rules:
-1. "category": "cooked_leftover" (for prepared dishes, curries, daals, cooked rice/pasta, meal preps, opened takeout) OR "raw_ingredient" (for fresh produce, raw meat/fish, dairy, eggs, pantry staples).
-2. "quantity": extract weight, volume, or count (e.g. "250 gms", "1 kg", "500 grams", "2 boxes", "6 eggs").
-3. "portions": realistic adult servings (e.g. 1.5, 4.0, 3.0).
-4. "storage_type": "Freezer" if frozen or mentioned in freezer; otherwise "Fridge".
-5. "urgency": "high" for cooked leftovers and raw meats; "medium" for fresh produce/dairy; "low" for freezer or shelf-stable.
-6. "name": clean, concise food name (e.g. "Cooked Indian Daal", "Raw Chicken Breasts", "Indian Curd", "Frozen Green Peas").
+CRITICAL RULES FOR SPOKEN DICTATION:
+1. CONTINUOUS STREAM SEPARATION: The user may speak multiple items without pauses or saying "comma" or "and" (e.g. "1 kg of courgette 250 grams of cabbage 250 grams of cauliflower"). You MUST identify quantity/food boundaries and create a separate item for EVERY food mentioned!
+2. CLEAN FOOD NAMES: NEVER include leading prepositions like "of", "some", "a", "an", "the" in food names (e.g. "Courgette", NOT "of courgette"; "Cabbage", NOT "of cabbage"). Capitalize cleanly.
+3. "category": "cooked_leftover" (for prepared dishes, curries, daals, cooked rice/pasta, meal preps, opened takeout) OR "raw_ingredient" (for fresh produce, raw meat/fish, dairy, eggs, pantry staples).
+4. "quantity": extract weight, volume, or count (e.g. "250 gms", "1 kg", "500 grams", "2 boxes", "6 eggs").
+5. "portions": realistic adult servings (e.g. 1.5, 4.0, 3.0).
+6. "storage_type": "Freezer" if frozen or mentioned in freezer; otherwise "Fridge".
+7. "urgency": "high" for cooked leftovers and raw meats; "medium" for fresh produce/dairy; "low" for freezer or shelf-stable.
+8. "name": clean, concise food name (e.g. "Courgette", "Cabbage", "Cauliflower", "Cooked Indian Daal", "Raw Chicken Breasts").
 
 Output ONLY JSON matching:
 {
   "items": [
     {
       "id": "item-1",
-      "name": "Food Name",
-      "category": "cooked_leftover" | "raw_ingredient",
-      "quantity": "250 gms",
-      "portions": 2.0,
-      "storage_type": "Fridge" | "Freezer",
-      "urgency": "high" | "medium" | "low",
+      "name": "Courgette",
+      "category": "raw_ingredient",
+      "quantity": "1 kg",
+      "portions": 4.0,
+      "storage_type": "Fridge",
+      "urgency": "medium",
       "dietary_tags": [],
       "notes": "Spoken details"
     }

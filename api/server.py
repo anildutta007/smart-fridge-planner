@@ -1013,25 +1013,27 @@ A family member dictated multiple food items stored in their fridge or freezer i
 "{transcript}"
 
 Task: Separate and document EVERY distinct food item mentioned into valid JSON.
-Rules:
-1. "category": "cooked_leftover" (for prepared dishes, curries, daals, cooked rice/pasta, meal preps, opened takeout) OR "raw_ingredient" (for fresh produce, raw meat/fish, dairy, eggs, pantry staples).
-2. "quantity": extract weight, volume, or count (e.g. "250 gms", "1 kg", "500 grams", "2 boxes", "6 eggs").
-3. "portions": realistic adult servings (e.g. 1.5, 4.0, 3.0).
-4. "storage_type": "Freezer" if frozen or mentioned in freezer; otherwise "Fridge".
-5. "urgency": "high" for cooked leftovers and raw meats; "medium" for fresh produce/dairy; "low" for freezer or shelf-stable.
-6. "name": clean, concise food name (e.g. "Cooked Indian Daal", "Raw Chicken Breasts", "Indian Curd", "Frozen Green Peas").
+CRITICAL RULES FOR SPOKEN DICTATION:
+1. CONTINUOUS STREAM SEPARATION: The user may speak multiple items without pauses or saying "comma" or "and" (e.g. "1 kg of courgette 250 grams of cabbage 250 grams of cauliflower"). You MUST identify quantity/food boundaries and create a separate item for EVERY food mentioned!
+2. CLEAN FOOD NAMES: NEVER include leading prepositions like "of", "some", "a", "an", "the" in food names (e.g. "Courgette", NOT "of courgette"; "Cabbage", NOT "of cabbage"). Capitalize cleanly.
+3. "category": "cooked_leftover" (for prepared dishes, curries, daals, cooked rice/pasta, meal preps, opened takeout) OR "raw_ingredient" (for fresh produce, raw meat/fish, dairy, eggs, pantry staples).
+4. "quantity": extract weight, volume, or count (e.g. "250 gms", "1 kg", "500 grams", "2 boxes", "6 eggs").
+5. "portions": realistic adult servings (e.g. 1.5, 4.0, 3.0).
+6. "storage_type": "Freezer" if frozen or mentioned in freezer; otherwise "Fridge".
+7. "urgency": "high" for cooked leftovers and raw meats; "medium" for fresh produce/dairy; "low" for freezer or shelf-stable.
+8. "name": clean, concise food name (e.g. "Courgette", "Cabbage", "Cauliflower", "Cooked Indian Daal", "Raw Chicken Breasts").
 
 Output ONLY JSON matching:
 {{
   "items": [
     {{
       "id": "item-1",
-      "name": "Food Name",
-      "category": "cooked_leftover" | "raw_ingredient",
-      "quantity": "250 gms",
-      "portions": 2.0,
-      "storage_type": "Fridge" | "Freezer",
-      "urgency": "high" | "medium" | "low",
+      "name": "Courgette",
+      "category": "raw_ingredient",
+      "quantity": "1 kg",
+      "portions": 4.0,
+      "storage_type": "Fridge",
+      "urgency": "medium",
       "dietary_tags": [],
       "notes": "Spoken details"
     }}
@@ -1056,30 +1058,47 @@ Output ONLY JSON matching:
         except Exception as e:
             print(f"Gemini voice parsing error: {e}. Falling back to NLP regex parser.")
 
-    # 2. High-precision NLP regex fallback
+    # 2. High-precision NLP continuous speech parser fallback
     import re
-    segments = [s.strip() for s in re.split(r'[\n\r]+|\.{2,}|,|;|\b(?:and\s+then|and\s+also)\b|[•\*\-]\s+', transcript) if s.strip()]
+    text = re.sub(r'\s+', ' ', transcript).strip()
+    unit_words = r'(?:kilograms?|kilos?|kgs?|kg|grams?|gms?|gm|g|milliliters?|ml|liters?|litres?|l|packs?|packets?|bags?|cans?|tubs?|boxes?|pieces?|pcs?|eggs?|portions?|servings?|bowls?)'
+    qty_prefix = r'(?:around|approx|about)?\s*(?:\d+(?:\.\d+)?\s*' + unit_words + r'|(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|half\s+(?:a\s+)?)\s*(?:kg|kilo|pack|packs|bag|bags|box|boxes|tub|tubs|can|cans|bottle|bottles|litre|liter|piece|pieces|bowl|bowls))\b'
+
+    raw_chunks = re.split(r'[\n\r]+|\.{2,}|,|;|\b(?:and\s+then|and\s+also)\b|[•\*\-]\s+', text, flags=re.I)
     refined = []
-    for seg in segments:
-        and_parts = re.split(r'\s+and\s+', seg, flags=re.I)
-        if len(and_parts) > 1:
-            for p in and_parts:
-                if p.strip(): refined.append(p.strip())
-        else:
-            refined.append(seg)
+    for chunk in raw_chunks:
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        and_parts = re.split(r'\s+and\s+(?!(?:cheese|chips|rice|dal|daal)\b)', chunk, flags=re.I)
+        for part in and_parts:
+            part = part.strip()
+            if not part:
+                continue
+            starts_with_qty = bool(re.match(r'^(?:' + qty_prefix + r')', part, flags=re.I))
+            if starts_with_qty:
+                # [QTY] [FOOD] [QTY] [FOOD]...
+                inserted = re.sub(r'([a-zA-Z\)])\s+(?=' + qty_prefix + r')', r'\1\n', part, flags=re.I)
+                for line in inserted.split('\n'):
+                    if line.strip(): refined.append(line.strip())
+            else:
+                # [FOOD] [QTY] [FOOD] [QTY]...
+                inserted = re.sub(r'(\b\d+(?:\.\d+)?\s*' + unit_words + r')\s+(?=[a-zA-Z](?!of\b))', r'\1\n', part, flags=re.I)
+                for line in inserted.split('\n'):
+                    if line.strip(): refined.append(line.strip())
 
     parsed_items = []
-    for idx, text in enumerate(refined):
-        lower = text.lower()
+    for idx, item in enumerate(refined):
+        lower = item.lower()
         is_freezer = bool(re.search(r'\b(?:freezer|frozen|deep\s*freeze|in\s*freezer)\b', lower))
         is_cooked = bool(re.search(r'\b(?:cooked|leftover|left over|curry|daal|dal|dhal|biryani|khichdi|rice|pasta|stew|soup|roast|roasted|boiled|baked|fried|grilled|tikka|masala|korma)\b', lower)) and not bool(re.search(r'\b(?:raw|uncooked)\b', lower))
 
         qty = "1 portion"
         portions = 2.0
-        kg_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:kilograms|kilogram|kilos|kilo|kgs|kg)\b', text, re.I)
-        gm_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:gms|gm|grams|gram|g)\b', text, re.I)
-        count_m = re.search(r'(\d+)\s*(?:pieces|piece|pcs|pack|packs|packet|packets|bags|bag|cans|can|eggs|breasts|fillets|tubs|boxes)\b', text, re.I)
-        portion_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:portions|portion|servings|serving|bowls|bowl)\b', text, re.I)
+        kg_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:kilograms?|kilos?|kgs?|kg)\b', item, re.I)
+        gm_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:gms?|grams?|gm|g)\b', item, re.I)
+        count_m = re.search(r'(\d+)\s*(?:pieces?|pcs?|packs?|packets?|bags?|cans?|tubs?|boxes?|eggs?)\b', item, re.I)
+        portion_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:portions?|servings?|bowls?)\b', item, re.I)
 
         if kg_m:
             val = float(kg_m.group(1))
@@ -1096,11 +1115,16 @@ Output ONLY JSON matching:
             portions = float(portion_m.group(1))
             qty = f"{portions} portions"
 
-        clean_name = re.sub(r'\b(?:in\s+the\s+freezer|in\s+freezer|in\s+the\s+fridge|in\s+fridge)\b', '', text, flags=re.I)
-        clean_name = re.sub(r'\b(?:around|approx|about)?\s*\d+(?:\.\d+)?\s*(?:gms|gm|grams|gram|g|kg|kgs|kilos|kilograms|ml|l|litres|liters)\b', '', clean_name, flags=re.I)
-        clean_name = re.sub(r'\b\d+\s*(?:portions|portion|servings|serving|bowls|bowl|pieces|piece|pcs|pack|packs|packet|packets|bags|bag|cans|can|tubs|boxes)\b', '', clean_name, flags=re.I)
+        clean_name = item
+        clean_name = re.sub(r'\b(?:in\s+the\s+freezer|in\s+freezer|in\s+the\s+fridge|in\s+fridge)\b', '', clean_name, flags=re.I)
+        clean_name = re.sub(r'\b(?:around|approx|about)?\s*\d+(?:\.\d+)?\s*(?:kilograms?|kilos?|kgs?|kg|grams?|gms?|gm|g|milliliters?|ml|liters?|litres?|l)\b', '', clean_name, flags=re.I)
+        clean_name = re.sub(r'\b\d+\s*(?:portions?|servings?|bowls?|pieces?|pcs?|packs?|packets?|bags?|cans?|tubs?|boxes?|eggs?)\b', '', clean_name, flags=re.I)
+        clean_name = re.sub(r'\b(?:a|an|one|two|three|four|five|six|half\s+a)\s+(?:kilo|kg|pack|bag|box|tub|can|bottle|litre|liter|piece)\b', '', clean_name, flags=re.I)
+        clean_name = re.sub(r'^(?:\s*(?:of|some|a|an|the|and)\s+)+', '', clean_name, flags=re.I)
+        clean_name = re.sub(r'(?:\s+(?:of|in|at)\s*)+$', '', clean_name, flags=re.I)
         clean_name = re.sub(r'\s{2,}', ' ', clean_name).strip()
-        clean_name = clean_name.capitalize() if clean_name else text.capitalize()
+        clean_name = re.sub(r'^of\s+', '', clean_name, flags=re.I).strip()
+        clean_name = clean_name.capitalize() if clean_name else item.capitalize()
 
         urgency = "high" if is_cooked or ("chicken" in lower or "meat" in lower or "fish" in lower) else ("low" if is_freezer else "medium")
         if is_freezer and not is_cooked:
