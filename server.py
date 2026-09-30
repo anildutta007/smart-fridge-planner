@@ -849,25 +849,49 @@ async def analyze_fridge(
                 mime_type = "image/webp"
         image_bytes = base64.b64decode(b64_str)
 
-    # Fallback if no key or SDK missing
-    if not api_key or not GENAI_AVAILABLE:
-        fallback_data = mock_analyze_fridge_image()
-        if text_notes and text_notes.strip():
-            lines = [l.strip() for l in text_notes.split("\n") if l.strip()]
+    # Fallback if no key or SDK missing, or when processing purely text/spoken input
+    if not api_key or not GENAI_AVAILABLE or (not image_bytes and text_notes and text_notes.strip()):
+        if not image_bytes and text_notes and text_notes.strip():
+            import re
+            lines = [l.strip() for l in re.split(r'[\n\r]+|\.{2,}|,|;', text_notes) if l.strip()]
+            parsed_items = []
             for idx, line in enumerate(lines):
-                is_cooked = any(w in line.lower() for w in ["cooked", "leftover", "curry", "rice", "pasta", "tupperware", "chili", "stew"])
-                fallback_data.append({
-                    "id": f"custom-{idx+1}",
+                lower = line.lower()
+                is_cooked = any(w in lower for w in [
+                    "cooked", "leftover", "left over", "curry", "rice", "pasta", 
+                    "tupperware", "chili", "stew", "daal", "dal", "biryani", "khichdi", 
+                    "soup", "bake", "roast", "tikka", "korma"
+                ])
+                # Extract weight / quantity
+                qty = "1 portion"
+                gm_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:gms|gm|grams|gram|g)\b', line, re.I)
+                kg_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:kilograms|kilogram|kilos|kilo|kgs|kg)\b', line, re.I)
+                if kg_match:
+                    qty = f"{kg_match.group(1)} kg"
+                elif gm_match:
+                    qty = f"{gm_match.group(1)} gms"
+
+                is_freezer = "freezer" in lower or "frozen" in lower
+                parsed_items.append({
+                    "id": f"item-{idx+1}",
                     "name": line,
                     "category": "cooked_leftover" if is_cooked else "raw_ingredient",
                     "sub_category": "prepared" if is_cooked else "produce",
-                    "quantity": "1 portion",
+                    "quantity": qty,
                     "portions": 2.0,
-                    "urgency": "high" if is_cooked else "medium",
+                    "urgency": "high" if is_cooked else ("low" if is_freezer else "medium"),
                     "dietary_tags": [],
-                    "storage_type": "Fridge",
-                    "notes": "Added from user notes"
+                    "storage_type": "Freezer" if is_freezer else "Fridge",
+                    "notes": "Added from user input"
                 })
+            return {
+                "status": "success",
+                "source": "text_analysis",
+                "message": f"Successfully parsed {len(parsed_items)} items from your input!",
+                "items": parsed_items
+            }
+
+        fallback_data = mock_analyze_fridge_image()
         return {
             "status": "success",
             "source": "fallback_mock",

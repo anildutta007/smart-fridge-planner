@@ -174,11 +174,42 @@ def test_family_profile_and_pin():
     assert len(loaded["inventory"]) == 1
     print("[OK] Family Profile & PIN protection verified: Save, List, Unauthorized Lock, and PIN Unlock all succeeded!")
 
+def test_spoken_or_typed_items_nlp():
+    spoken_text = "Cooked Indian Daal 250 gms.. Raw Chicken breasts 1 Kilogram, Indian curd around 500 grams"
+    response = client.post(
+        "/api/analyze-fridge",
+        data={"text_notes": spoken_text}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    items = data["items"]
+    assert len(items) == 3, f"Expected 3 items, got {len(items)}"
+    
+    # 1. Daal
+    daal = next(i for i in items if "daal" in i["name"].lower())
+    assert daal["category"] == "cooked_leftover", "Daal must be identified as cooked leftover"
+    assert "250" in daal["quantity"]
+    assert daal["urgency"] == "high"
+
+    # 2. Chicken breasts
+    chicken = next(i for i in items if "chicken" in i["name"].lower())
+    assert chicken["category"] == "raw_ingredient", "Chicken breasts must be raw ingredient"
+    assert "1 kg" in chicken["quantity"]
+
+    # 3. Curd
+    curd = next(i for i in items if "curd" in i["name"].lower())
+    assert curd["category"] == "raw_ingredient", "Curd must be raw ingredient"
+    assert "500" in curd["quantity"]
+
+    print("[OK] Spoken/Typed NLP parser verified with Cooked Daal (250g), Raw Chicken (1kg), and Indian Curd (500g)!")
+
 if __name__ == "__main__":
     try:
         test_health()
         test_sample_data()
         test_analyze_fridge_fallback()
+        test_spoken_or_typed_items_nlp()
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()
         test_indian_egg_free_elderly_member()

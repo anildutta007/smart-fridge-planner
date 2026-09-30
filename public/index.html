@@ -150,75 +150,114 @@
     <!-- ========================================== -->
     <div id="tabContentFridge" class="tab-content space-y-6">
       
-      <!-- Upload / Camera / Input Area -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <!-- Simplified Add Items Card (Voice, Text, Weights, Cooked vs Raw) -->
+      <div class="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 card-shadow space-y-4">
         
-        <!-- Snapshot & Camera Card (Left) -->
-        <div class="lg:col-span-6 bg-white p-5 rounded-2xl border border-slate-200 card-shadow space-y-4">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-bold text-slate-900 flex items-center space-x-2">
-              <i class="ph-bold ph-camera text-emerald-600"></i>
-              <span>Fridge Photo / Snapshot</span>
+        <!-- Header & Quick Actions -->
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900 flex items-center space-x-2">
+              <i class="ph-bold ph-microphone text-emerald-600"></i>
+              <span>Add Items to Fridge & Freezer</span>
             </h2>
-            <button onclick="loadSampleInventory()" class="text-xs font-semibold px-2.5 py-1 rounded bg-amber-50 text-amber-700 hover:bg-amber-100 transition flex items-center space-x-1">
-              <i class="ph-bold ph-lightning"></i>
-              <span>Quick Sample Fridge</span>
+            <p class="text-xs text-slate-500 mt-0.5">
+              Speak or type what you have — cooked leftovers or raw ingredients with weights or portions. We'll automatically identify the category, weight, and urgency.
+            </p>
+          </div>
+          <div class="flex items-center space-x-2 flex-wrap">
+            <button type="button" onclick="openAddItemModal()" class="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center space-x-1.5 transition">
+              <i class="ph-bold ph-plus-circle text-emerald-600"></i>
+              <span>+ Add Single Item</span>
             </button>
+            <button type="button" onclick="togglePhotoUploadSection()" id="btnTogglePhoto" class="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 flex items-center space-x-1.5 transition">
+              <i class="ph-bold ph-camera text-indigo-600"></i>
+              <span>📷 Photo Scanner</span>
+            </button>
+            <button type="button" onclick="loadSampleInventory()" class="text-xs font-semibold px-2.5 py-2 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition flex items-center space-x-1" title="Load sample demo items for testing">
+              <i class="ph-bold ph-lightning"></i>
+              <span>Sample Demo</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Voice & Type Control Area -->
+        <div class="space-y-3">
+          <!-- Voice Banner with Tap-to-Speak button -->
+          <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-emerald-50/80 via-teal-50/50 to-indigo-50/80 border border-emerald-200/80 rounded-xl">
+            <div class="flex items-center space-x-3">
+              <button id="btnVoiceInput" onclick="toggleVoiceRecording()" type="button" class="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm flex items-center space-x-2 shadow-sm transition active:scale-95 cursor-pointer">
+                <i id="voiceMicIcon" class="ph-bold ph-microphone text-lg"></i>
+                <span id="voiceMicLabel">Tap to Speak Items</span>
+              </button>
+              <span id="voiceStatusText" class="text-xs text-slate-600 font-medium">Click to speak (e.g. "Cooked Indian Daal 250 gms, Raw Chicken breasts 1 Kilogram")</span>
+            </div>
+            
+            <div class="flex items-center space-x-2 self-end sm:self-auto">
+              <button type="button" onclick="insertExampleInput()" class="text-[11px] font-semibold px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-indigo-700 hover:bg-indigo-50 transition shadow-xs">
+                💡 Try Example: Daal, Chicken, Curd
+              </button>
+              <button type="button" onclick="clearVoiceTextInput()" class="text-[11px] text-slate-400 hover:text-slate-600 px-2 py-1">
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <!-- Spoken or Typed Textarea -->
+          <div class="relative">
+            <textarea id="textNotesInput" rows="4" placeholder="Speak using the button above or type your items here... e.g.&#10;Cooked Indian Daal 250 gms&#10;Raw Chicken breasts 1 Kilogram&#10;Indian curd around 500 grams&#10;Leftover vegetable biryani 2 bowls&#10;Frozen peas 1 pack in freezer" class="w-full text-xs sm:text-sm p-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none transition leading-relaxed"></textarea>
+          </div>
+
+          <!-- Bottom Action -->
+          <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-1">
+            <p class="text-[11px] text-slate-500">
+              💡 <strong>Smart auto-tagging:</strong> Cooked leftovers get <strong>Priority 1</strong> (eat in 1-2 days). Raw items are queued for recipes. You can edit any item once added!
+            </p>
+            <button id="btnAnalyzeFridge" onclick="processSpokenOrTypedItems()" type="button" class="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center space-x-2 transition shadow-md cursor-pointer">
+              <i class="ph-bold ph-plus-circle text-lg"></i>
+              <span>Add Items to Fridge / Freezer</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Collapsible Photo Scanner Section (Hidden by default) -->
+        <div id="photoScannerSection" class="hidden pt-4 border-t border-slate-200 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-slate-800 flex items-center space-x-2">
+              <i class="ph-bold ph-camera text-indigo-600"></i>
+              <span>Optional: Photo Snapshot Scanner</span>
+            </h3>
+            <span class="text-xs text-slate-400">Gemini Vision AI</span>
           </div>
 
           <!-- Drag and drop / file input -->
-          <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-6 text-center cursor-pointer transition bg-slate-50 hover:bg-emerald-50/30 flex flex-col items-center justify-center min-h-[190px]">
+          <div id="dropZone" class="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-6 text-center cursor-pointer transition bg-slate-50 hover:bg-emerald-50/30 flex flex-col items-center justify-center min-h-[160px]">
             <input type="file" id="fileInput" accept="image/*" class="hidden">
             <div id="dropZoneDefault" class="space-y-2">
-              <div class="w-12 h-12 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl">
+              <div class="w-10 h-10 mx-auto rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-xl">
                 <i class="ph-bold ph-upload-simple"></i>
               </div>
-              <p class="text-sm font-semibold text-slate-700">Click to upload or drag fridge photo here</p>
-              <p class="text-xs text-slate-400">Supports JPG, PNG, WEBP from your phone or camera</p>
+              <p class="text-xs font-semibold text-slate-700">Click to upload or drag fridge photo here</p>
+              <p class="text-[11px] text-slate-400">Supports JPG, PNG, WEBP from your phone or camera</p>
             </div>
             <!-- Image preview -->
             <div id="imagePreviewContainer" class="hidden relative w-full">
-              <img id="imagePreview" src="" alt="Fridge snapshot" class="max-h-56 mx-auto rounded-lg object-contain shadow-sm border border-slate-200">
+              <img id="imagePreview" src="" alt="Fridge snapshot" class="max-h-52 mx-auto rounded-lg object-contain shadow-sm border border-slate-200">
               <button onclick="clearImage(event)" class="absolute top-2 right-2 bg-red-600 text-white rounded-full p-1 text-xs hover:bg-red-700 shadow">
                 <i class="ph-bold ph-x"></i>
               </button>
             </div>
           </div>
 
-          <!-- Camera & Text Buttons -->
+          <!-- Camera Buttons -->
           <div class="flex items-center space-x-3">
-            <button onclick="openCameraModal()" class="flex-1 py-2 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center justify-center space-x-1.5 transition">
+            <button onclick="openCameraModal()" type="button" class="py-2 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center justify-center space-x-1.5 transition">
               <i class="ph-bold ph-webcam text-indigo-600"></i>
               <span>Use Live Camera</span>
             </button>
-            <button onclick="openAddItemModal()" class="flex-1 py-2 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center justify-center space-x-1.5 transition">
-              <i class="ph-bold ph-plus-circle text-emerald-600"></i>
-              <span>Add Item Manually</span>
+            <button onclick="analyzeFridgeAI()" type="button" class="py-2 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center space-x-1.5 transition shadow-sm">
+              <i class="ph-bold ph-scan"></i>
+              <span>Scan Photo with Gemini AI</span>
             </button>
-          </div>
-        </div>
-
-        <!-- Text Inventory & AI Analyze Action (Right) -->
-        <div class="lg:col-span-6 bg-white p-5 rounded-2xl border border-slate-200 card-shadow flex flex-col justify-between space-y-4">
-          <div>
-            <h2 class="text-base font-bold text-slate-900 flex items-center space-x-2">
-              <i class="ph-bold ph-textbox text-indigo-600"></i>
-              <span>Quick Notes / Extra Items</span>
-            </h2>
-            <p class="text-xs text-slate-500 mt-1">
-              Add any items hidden in drawers or describe leftovers (e.g. "2 portions leftover shepherd's pie, 4 eggs, half cucumber").
-            </p>
-            <textarea id="textNotesInput" rows="5" placeholder="e.g. Leftover lamb biryani (2 portions in glass bowl)&#10;500g raw chicken breast&#10;1 pack firm tofu&#10;Half a block of cheddar" class="mt-3 w-full text-xs sm:text-sm p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"></textarea>
-          </div>
-
-          <div class="space-y-3 pt-2">
-            <button id="btnAnalyzeFridge" onclick="analyzeFridgeAI()" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm flex items-center justify-center space-x-2 transition shadow-md">
-              <i class="ph-bold ph-scan text-lg"></i>
-              <span>Identify Fridge Items with Gemini AI</span>
-            </button>
-            <p class="text-[11px] text-center text-slate-400">
-              AI automatically classifies items into <strong class="text-red-600">Cooked Leftovers</strong> (Priority 1) vs <strong class="text-emerald-700">Raw Ingredients</strong>.
-            </p>
           </div>
         </div>
 
@@ -452,13 +491,15 @@
   <div id="itemModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100 space-y-4">
       <div class="flex items-center justify-between pb-3 border-b border-slate-100">
-        <h3 class="text-base font-bold text-slate-900">Add Fridge Item</h3>
+        <h3 id="itemModalTitle" class="text-base font-bold text-slate-900">Add Fridge Item</h3>
         <button onclick="closeItemModal()" class="text-slate-400 hover:text-slate-600">
           <i class="ph ph-x text-lg"></i>
         </button>
       </div>
 
       <form id="itemForm" onsubmit="saveInventoryItem(event)" class="space-y-4 text-xs sm:text-sm">
+        <input type="hidden" id="itemFormId" value="">
+
         <div>
           <label class="block font-semibold text-slate-700 mb-1">Item Name</label>
           <input type="text" id="itemFormName" required placeholder="e.g. Leftover Bolognese or Raw Salmon" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
@@ -466,7 +507,7 @@
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block font-semibold text-slate-700 mb-1">Type</label>
+            <label class="block font-semibold text-slate-700 mb-1">Type / Category</label>
             <select id="itemFormCategory" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
               <option value="cooked_leftover">Cooked Leftover 🚨</option>
               <option value="raw_ingredient" selected>Raw Ingredient 🥦</option>
@@ -477,15 +518,15 @@
             <select id="itemFormUrgency" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
               <option value="high">High (Eat in 1-2 days)</option>
               <option value="medium" selected>Medium (3-5 days)</option>
-              <option value="low">Low (Shelf-stable)</option>
+              <option value="low">Low (Shelf-stable / Frozen)</option>
             </select>
           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block font-semibold text-slate-700 mb-1">Quantity</label>
-            <input type="text" id="itemFormQuantity" placeholder="e.g. 500g, 3 portions" value="2 portions" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+            <label class="block font-semibold text-slate-700 mb-1">Quantity / Weight</label>
+            <input type="text" id="itemFormQuantity" placeholder="e.g. 250 gms, 1 kg, 3 portions" value="2 portions" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
           </div>
           <div>
             <label class="block font-semibold text-slate-700 mb-1">Estimated Portions</label>
@@ -502,9 +543,14 @@
           </select>
         </div>
 
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Notes / Preparation Tips (Optional)</label>
+          <input type="text" id="itemFormNotes" placeholder="e.g. Mild spice, gentle on stomach, in glass container" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+        </div>
+
         <div class="flex justify-end space-x-2 pt-3 border-t border-slate-100">
           <button type="button" onclick="closeItemModal()" class="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 font-medium">Cancel</button>
-          <button type="submit" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm">Add Item</button>
+          <button type="submit" id="itemFormSubmitBtn" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm">Save Item</button>
         </div>
       </form>
     </div>
