@@ -253,6 +253,35 @@ def test_continuous_stream_voice_dictation():
     
     print("[OK] Continuous unpunctuated voice dictation verified: Courgette (1kg), Cabbage (250g), Cauliflower (250g) documented cleanly without 'of' prefixes!")
 
+def test_word_numbers_voice_dictation():
+    # User's exact sentence: "500 grams of cabbage three portions of cooked chicken"
+    raw_speech = "500 grams of cabbage three portions of cooked chicken"
+    res = client.post("/api/parse-voice", json={"voice_transcript": raw_speech})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    items = data["items"]
+    assert len(items) == 2, f"Expected 2 items, got {len(items)}: {items}"
+
+    # Item 1: Cabbage
+    cabbage = next((i for i in items if i["name"].lower() == "cabbage"), None)
+    assert cabbage is not None, f"Expected Cabbage in {items}"
+    assert "500" in cabbage["quantity"]
+    assert cabbage["category"] == "raw_ingredient"
+    assert cabbage["storage_type"] == "Fridge"
+
+    # Item 2: Cooked chicken
+    chicken = next((i for i in items if "chicken" in i["name"].lower()), None)
+    assert chicken is not None, f"Expected Cooked chicken in {items}"
+    assert chicken["name"] == "Cooked chicken"
+    assert "3" in chicken["quantity"]
+    assert chicken["portions"] == 3.0
+    assert chicken["category"] == "cooked_leftover"
+    assert chicken["urgency"] == "high"
+    assert chicken["storage_type"] == "Fridge"
+
+    print("[OK] Word-number dictation verified: '500 grams of cabbage three portions of cooked chicken' split into Cabbage (500g, raw) and Cooked chicken (3 portions, cooked_leftover, high urgency)!")
+
 def test_analyze_video_frames_endpoint():
     # 1x1 transparent/black JPEG data url
     dummy_frame = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
@@ -289,6 +318,7 @@ if __name__ == "__main__":
         test_spoken_or_typed_items_nlp()
         test_parse_voice_endpoint()
         test_continuous_stream_voice_dictation()
+        test_word_numbers_voice_dictation()
         test_analyze_video_frames_endpoint()
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()
