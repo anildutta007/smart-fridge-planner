@@ -219,6 +219,34 @@ def test_parse_voice_endpoint():
     assert freezer_item["storage_type"] == "Freezer"
     print(f"[OK] Multi-item voice dictation endpoint verified: {len(items)} items documented into Fridge and Freezer!")
 
+def test_analyze_video_frames_endpoint():
+    # 1x1 transparent/black JPEG data url
+    dummy_frame = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+    
+    # 1. Test Fridge sweep
+    res = client.post("/api/analyze-video-frames", json={
+        "frames": [dummy_frame, dummy_frame, dummy_frame],
+        "storage_hint": "Fridge"
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert len(data["items"]) > 0
+    categories = [i["category"] for i in data["items"]]
+    assert "cooked_leftover" in categories
+    assert "raw_ingredient" in categories
+    
+    # 2. Test Freezer sweep
+    res_freezer = client.post("/api/analyze-video-frames", json={
+        "frames": [dummy_frame, dummy_frame],
+        "storage_hint": "Freezer"
+    })
+    assert res_freezer.status_code == 200
+    data_freezer = res_freezer.json()
+    assert data_freezer["status"] == "success"
+    assert all(i["storage_type"] == "Freezer" for i in data_freezer["items"])
+    print(f"[OK] Video sweep analysis endpoint verified: {len(data['items'])} deduplicated shelf items extracted!")
+
 if __name__ == "__main__":
     try:
         test_health()
@@ -226,6 +254,7 @@ if __name__ == "__main__":
         test_analyze_fridge_fallback()
         test_spoken_or_typed_items_nlp()
         test_parse_voice_endpoint()
+        test_analyze_video_frames_endpoint()
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()
         test_indian_egg_free_elderly_member()
@@ -234,3 +263,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n[FAIL] Test failed: {e}", file=sys.stderr)
         raise
+

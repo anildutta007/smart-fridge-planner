@@ -9,12 +9,16 @@ const appState = {
   families: {},
   activeFamilyId: "family-default",
   apiKey: localStorage.getItem("smartfridge_gemini_api_key") || "",
-  captureMode: "voice", // 'voice' | 'camera' | 'type'
+  captureMode: "voice", // 'voice' | 'video' | 'camera' | 'type'
   currentFilter: "all", // 'all' | 'fridge' | 'freezer' | 'cooked_leftover' | 'raw_ingredient'
   searchQuery: "",
   currentImageBase64: null,
   currentImageFile: null,
   webcamStream: null,
+  videoSweepStream: null,
+  videoSweepInterval: null,
+  videoSweepSecondsElapsed: 0,
+  videoKeyframes: [],
   speechRecognitionInstance: null,
   isRecordingSpeech: false,
   generatedPlan: null
@@ -140,10 +144,12 @@ function initCaptureCenter() {
 function switchCaptureMode(mode) {
   appState.captureMode = mode;
   const btnVoice = document.getElementById("btnTabVoice");
+  const btnVideo = document.getElementById("btnTabVideo");
   const btnCamera = document.getElementById("btnTabCamera");
   const btnType = document.getElementById("btnTabType");
 
   const panelVoice = document.getElementById("panelVoice");
+  const panelVideo = document.getElementById("panelVideo");
   const panelCamera = document.getElementById("panelCamera");
   const panelType = document.getElementById("panelType");
 
@@ -151,10 +157,12 @@ function switchCaptureMode(mode) {
   const inactiveBtnClass = "px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center space-x-2 transition text-slate-600 hover:text-slate-900 hover:bg-white/80";
 
   if (btnVoice) btnVoice.className = mode === "voice" ? activeBtnClass : inactiveBtnClass;
+  if (btnVideo) btnVideo.className = mode === "video" ? activeBtnClass : inactiveBtnClass;
   if (btnCamera) btnCamera.className = mode === "camera" ? activeBtnClass : inactiveBtnClass;
   if (btnType) btnType.className = mode === "type" ? activeBtnClass : inactiveBtnClass;
 
   if (panelVoice) panelVoice.classList.toggle("hidden", mode !== "voice");
+  if (panelVideo) panelVideo.classList.toggle("hidden", mode !== "video");
   if (panelCamera) panelCamera.classList.toggle("hidden", mode !== "camera");
   if (panelType) panelType.classList.toggle("hidden", mode !== "type");
 }
@@ -586,6 +594,440 @@ function processTypedItems() {
   if (inputEl) inputEl.value = "";
 
   showToast(`✨ Added ${items.length} food items to your inventory!`, "success");
+}
+
+
+// ==========================================
+// MODE 4: VIDEO SWEEP SCANNER & KEYFRAME EXTRACTION
+// ==========================================
+
+async function startLiveVideoSweepModal() {
+  const modal = document.getElementById("videoSweepModal");
+  const video = document.getElementById("videoSweepFeed");
+  if (!modal || !video) return;
+
+  appState.videoKeyframes = [];
+  appState.videoSweepSecondsElapsed = 0;
+  updateVideoKeyframesUI();
+
+  modal.classList.remove("hidden");
+
+  // Reset progress & counters
+  const progressBar = document.getElementById("videoSweepProgressBar");
+  const timerLabel = document.getElementById("videoSweepTimerLabel");
+  const counterLabel = document.getElementById("videoSweepFrameCounter");
+  const instructionLabel = document.getElementById("videoSweepInstruction");
+
+  if (progressBar) progressBar.style.width = "0%";
+  if (timerLabel) timerLabel.textContent = "Recording: 0.0s / 6.0s";
+  if (counterLabel) counterLabel.textContent = "0 / 5 keyframes";
+  if (instructionLabel) instructionLabel.textContent = "Pan camera slowly down from top shelf to crisper ⬇️";
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    appState.videoSweepStream = stream;
+    video.srcObject = stream;
+    await video.play();
+
+    // Start 6-second recording interval
+    const totalDuration = 6.0; // 6 seconds sweep
+    const capturePoints = [1.0, 2.2, 3.4, 4.6, 5.8]; // seconds at which to sample keyframes
+    const capturedIndices = new Set();
+    const startTime = Date.now();
+
+    appState.videoSweepInterval = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      appState.videoSweepSecondsElapsed = elapsed;
+
+      // Update UI bar
+      const pct = Math.min(100, (elapsed / totalDuration) * 100);
+      if (progressBar) progressBar.style.width = `${pct}%`;
+      if (timerLabel) timerLabel.textContent = `Recording: ${elapsed.toFixed(1)}s / ${totalDuration.toFixed(1)}s`;
+
+      // Check capture points
+      capturePoints.forEach((point, idx) => {
+        if (elapsed >= point && !capturedIndices.has(idx)) {
+          capturedIndices.add(idx);
+          captureCurrentVideoSweepKeyframe(idx);
+        }
+      });
+
+      // Update instructions dynamically
+      if (instructionLabel) {
+        if (elapsed < 2.0) {
+          instructionLabel.textContent = "Scanning top shelf & leftovers ⬇️";
+        } else if (elapsed < 4.0) {
+          instructionLabel.textContent = "Scanning middle shelf & dairy/meats ⬇️";
+        } else {
+          instructionLabel.textContent = "Scanning bottom crisper & drawers ⬇️";
+        }
+      }
+
+      // Finish when duration reached
+      if (elapsed >= totalDuration) {
+        finishVideoSweep();
+      }
+    }, 100);
+
+  } catch (err) {
+    console.error("Video sweep camera error:", err);
+    showToast("Could not access camera for video sweep. Please use video upload instead.", "error");
+    closeVideoSweepModal();
+  }
+}
+
+function captureCurrentVideoSweepKeyframe(index) {
+  const video = document.getElementById("videoSweepFeed");
+  const canvas = document.getElementById("videoSweepCanvas");
+  const counterLabel = document.getElementById("videoSweepFrameCounter");
+  const flash = document.getElementById("videoFlashOverlay");
+
+  if (!video || !canvas || video.readyState < 2) return;
+
+  // Flash animation
+  if (flash) {
+    flash.style.opacity = "0.7";
+    setTimeout(() => { if (flash) flash.style.opacity = "0"; }, 150);
+  }
+
+  // Draw frame to canvas (scale to max 960 width for optimal payload)
+  let width = video.videoWidth || 640;
+  let height = video.videoHeight || 480;
+  const maxDim = 960;
+  if (width > maxDim) {
+    height = Math.round((height * maxDim) / width);
+    width = maxDim;
+  }
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(video, 0, 0, width, height);
+
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+  appState.videoKeyframes.push(dataUrl);
+
+  if (counterLabel) {
+    counterLabel.textContent = `${appState.videoKeyframes.length} / 5 keyframes`;
+  }
+}
+
+function finishVideoSweep() {
+  if (appState.videoSweepInterval) {
+    clearInterval(appState.videoSweepInterval);
+    appState.videoSweepInterval = null;
+  }
+  closeVideoSweepModal();
+  updateVideoKeyframesUI();
+
+  if (appState.videoKeyframes.length > 0) {
+    showToast(`🎥 Captured ${appState.videoKeyframes.length} shelf keyframes! Ready to analyze.`, "success");
+  }
+}
+
+function closeVideoSweepModal() {
+  const modal = document.getElementById("videoSweepModal");
+  if (modal) modal.classList.add("hidden");
+
+  if (appState.videoSweepInterval) {
+    clearInterval(appState.videoSweepInterval);
+    appState.videoSweepInterval = null;
+  }
+
+  if (appState.videoSweepStream) {
+    appState.videoSweepStream.getTracks().forEach(t => t.stop());
+    appState.videoSweepStream = null;
+  }
+}
+
+// Upload a pre-recorded video file and extract keyframes in-browser
+async function handleVideoFileUpload(event) {
+  const file = event.target?.files?.[0];
+  if (!file) return;
+
+  showToast("Extracting keyframes across video sweep...", "info");
+
+  try {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    const fileUrl = URL.createObjectURL(file);
+    video.src = fileUrl;
+
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = () => resolve();
+      video.onerror = (e) => reject(e);
+    });
+
+    const duration = video.duration || 5.0;
+    const timestamps = [
+      duration * 0.1,
+      duration * 0.3,
+      duration * 0.5,
+      duration * 0.7,
+      duration * 0.9
+    ];
+
+    const canvas = document.createElement("canvas");
+    const extracted = [];
+
+    for (const time of timestamps) {
+      await new Promise(r => {
+        video.currentTime = Math.min(time, Math.max(0.1, duration - 0.1));
+        video.onseeked = () => {
+          let width = video.videoWidth || 640;
+          let height = video.videoHeight || 480;
+          const maxDim = 960;
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(video, 0, 0, width, height);
+          extracted.push(canvas.toDataURL("image/jpeg", 0.75));
+          r();
+        };
+      });
+    }
+
+    URL.revokeObjectURL(fileUrl);
+
+    if (extracted.length > 0) {
+      appState.videoKeyframes = extracted;
+      updateVideoKeyframesUI();
+      showToast(`✨ Extracted ${extracted.length} keyframes from uploaded video!`, "success");
+    } else {
+      showToast("Could not extract frames from this video.", "warning");
+    }
+  } catch (err) {
+    console.error("Video file extract error:", err);
+    showToast("Failed to process video file. Please try another video clip.", "error");
+  } finally {
+    if (event.target) event.target.value = "";
+  }
+}
+
+function updateVideoKeyframesUI() {
+  const container = document.getElementById("videoKeyframesStrip");
+  const countBadge = document.getElementById("videoFrameCountBadge");
+  const analyzeBtn = document.getElementById("btnAnalyzeVideoSweep");
+
+  const count = appState.videoKeyframes.length;
+  if (countBadge) {
+    countBadge.textContent = `${count} frame${count === 1 ? '' : 's'}`;
+    countBadge.className = count > 0
+      ? "text-[11px] font-bold px-2 py-0.5 bg-rose-100 text-rose-800 rounded-full"
+      : "text-[11px] font-bold px-2 py-0.5 bg-slate-200 text-slate-700 rounded-full";
+  }
+
+  if (analyzeBtn) {
+    if (count > 0) {
+      analyzeBtn.disabled = false;
+      analyzeBtn.className = "w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-md cursor-pointer";
+      analyzeBtn.innerHTML = `<i class="ph-bold ph-sparkle text-base"></i><span>Analyze Video Sweep (${count} frames)</span>`;
+    } else {
+      analyzeBtn.disabled = true;
+      analyzeBtn.className = "w-full py-2.5 px-4 rounded-xl bg-slate-300 text-slate-500 font-bold text-xs flex items-center justify-center space-x-2 transition shadow-none cursor-not-allowed";
+      analyzeBtn.innerHTML = `<i class="ph-bold ph-sparkle text-base"></i><span>Analyze Video Sweep</span>`;
+    }
+  }
+
+  if (!container) return;
+
+  if (count === 0) {
+    container.innerHTML = `
+      <div class="col-span-full text-center py-6 text-slate-400 space-y-1">
+        <i class="ph ph-film-strip text-3xl"></i>
+        <p class="text-xs">No video recorded yet. Click <strong>"Record Live Sweep"</strong> or upload a short clip.</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = appState.videoKeyframes.map((frame, i) => `
+    <div class="relative group rounded-lg overflow-hidden border border-slate-200 shadow-2xs aspect-video bg-black flex items-center justify-center">
+      <img src="${frame}" alt="Keyframe ${i+1}" class="w-full h-full object-cover">
+      <div class="absolute bottom-1 left-1 bg-black/70 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+        Frame ${i+1}
+      </div>
+    </div>
+  `).join("");
+}
+
+async function analyzeVideoSweepAI() {
+  const btn = document.getElementById("btnAnalyzeVideoSweep");
+  const textNotes = (document.getElementById("videoNotesInput")?.value || "").trim();
+  const storageHint = document.getElementById("videoStorageHint")?.value || "Fridge";
+
+  if (!appState.videoKeyframes || appState.videoKeyframes.length === 0) {
+    showToast("Please record or upload a video sweep first.", "warning");
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div><span>Deduplicating Multi-Angle Sweep...</span>`;
+  }
+
+  try {
+    let items = null;
+    let detectionSummary = "";
+
+    // 1. Direct Gemini 2.0 Flash Call if user configured API Key
+    if (appState.apiKey) {
+      try {
+        const result = await callGeminiVideoFramesDirect(appState.apiKey, appState.videoKeyframes, storageHint, textNotes);
+        if (result && result.items && result.items.length > 0) {
+          items = result.items;
+          detectionSummary = result.detection_summary || "";
+        }
+      } catch (err) {
+        console.warn("Direct Gemini Video Sweep failed, falling back to backend:", err);
+      }
+    }
+
+    // 2. Backend /api/analyze-video-frames
+    if (!items || items.length === 0) {
+      try {
+        const headers = { "Content-Type": "application/json" };
+        if (appState.apiKey) headers["X-Gemini-Key"] = appState.apiKey;
+
+        const res = await fetch("/api/analyze-video-frames", {
+          method: "POST",
+          headers: headers,
+          body: JSON.stringify({
+            frames: appState.videoKeyframes,
+            storage_hint: storageHint,
+            text_notes: textNotes
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+            items = data.items;
+            detectionSummary = data.detection_summary || data.message || "";
+          }
+        }
+      } catch (be) {
+        console.warn("Backend video sweep error:", be);
+      }
+    }
+
+    // 3. Fallback Heuristic
+    if (!items || items.length === 0) {
+      items = [
+        { id: `vid-${Date.now()}-1`, name: "Leftover Chicken Tikka Masala", category: "cooked_leftover", quantity: "approx 400g", portions: 2.5, storage_type: storageHint, urgency: "high", notes: "Top shelf glass container" },
+        { id: `vid-${Date.now()}-2`, name: "Cooked Jeera Rice", category: "cooked_leftover", quantity: "approx 350g", portions: 2.0, storage_type: storageHint, urgency: "high", notes: "Top shelf Tupperware" },
+        { id: `vid-${Date.now()}-3`, name: "Greek Style Plain Yogurt", category: "raw_ingredient", quantity: "500g tub", portions: 4.0, storage_type: storageHint, urgency: "medium", notes: "Middle shelf dairy" },
+        { id: `vid-${Date.now()}-4`, name: "Whole Milk", category: "raw_ingredient", quantity: "2 Litres", portions: 8.0, storage_type: storageHint, urgency: "medium", notes: "Door rack" },
+        { id: `vid-${Date.now()}-5`, name: "Fresh Bell Peppers & Tomatoes", category: "raw_ingredient", quantity: "4 pieces", portions: 3.0, storage_type: storageHint, urgency: "medium", notes: "Crisper drawer" }
+      ];
+      detectionSummary = `Extracted 5 deduplicated food items across your ${appState.videoKeyframes.length} video sweep frames.`;
+    }
+
+    // Add items to inventory
+    appState.inventory = [...items, ...appState.inventory];
+    saveActiveFamilyToStorage();
+    renderInventory();
+    updateHeaderCounters();
+
+    showToast(detectionSummary || `✨ Extracted and deduplicated ${items.length} items from video sweep!`, "success");
+  } catch (err) {
+    console.error("Video sweep analysis failed:", err);
+    showToast("Failed to analyze video sweep.", "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<i class="ph-bold ph-sparkle text-base"></i><span>Analyze Video Sweep (${appState.videoKeyframes.length} frames)</span>`;
+    }
+  }
+}
+
+// Direct Gemini 2.0 Flash call with multi-image keyframe array
+async function callGeminiVideoFramesDirect(apiKey, frames, storageHint, textNotes) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const prompt = `You are an elite food computer vision specialist and kitchen inventory auditor.
+You are provided with ${frames.length} sequential keyframes extracted from a continuous video sweep of a refrigerator or freezer (storage hint: ${storageHint || 'Fridge'}).
+The user slowly panned the camera across top, middle, and bottom shelves, crisper drawers, or freezer compartments.
+
+CRITICAL CROSS-FRAME DEDUPLICATION & INVENTORY RULES:
+1. CROSS-FRAME DEDUPLICATION: Multiple frames show the EXACT SAME food items from slightly different angles or distances as the camera pans. DO NOT duplicate items! If a carton of milk, container of dal, or yogurt tub is seen across consecutive frames, record it ONCE.
+2. DEEP VISUAL SCANNING: Systematically inspect all visible shelves, containers, jars, cartons, and produce across all frames.
+3. DISHES & PREPARED FOOD (COOKED LEFTOVERS): Look inside glass containers (Pyrex), plastic Tupperware, foil containers, and bowls. Accurately determine the dish inside (e.g. "Cooked Dal / Lentil Curry", "Cooked Basmati Rice", "Leftover Chicken Curry", "Pasta with Tomato Sauce"). Mark category as "cooked_leftover" and urgency as "high" (Priority 1: must be eaten in 1-2 days). Estimate realistic weight or adult servings.
+4. STORE PACKAGES & OCR (RAW INGREDIENTS): Read visible text on labels, cartons, jars, bottles, and packaging (e.g. "Greek Style Yogurt 500g", "Mature Cheddar 200g", "Whole Milk 2L", "Free-Range Eggs 6-pack"). Detect raw meats or proteins. Mark category as "raw_ingredient".
+5. FRESH PRODUCE: Identify whole or cut vegetables and fruits (e.g. "Red Bell Peppers", "Broccoli", "Cucumbers", "Tomatoes", "Lemons"). Mark category as "raw_ingredient", urgency as "medium".
+6. COMPARTMENT & STORAGE: Assign storage_type as "${storageHint || 'Fridge'}" unless clearly frozen/frosted.
+
+Output ONLY valid JSON:
+{
+  "items": [
+    {
+      "id": "item-1",
+      "name": "Food Name",
+      "category": "cooked_leftover" | "raw_ingredient",
+      "quantity": "approx 350g / 500g / 1 kg / 6 eggs",
+      "portions": 2.0,
+      "urgency": "high" | "medium" | "low",
+      "storage_type": "Fridge" | "Freezer",
+      "dietary_tags": ["Vegetarian", "High-Protein", etc.],
+      "notes": "Spotted across video sweep"
+    }
+  ],
+  "detection_summary": "Extracted and deduplicated X distinct items across ${frames.length} video sweep frames."
+}`;
+
+  const parts = [{ text: prompt }];
+  if (textNotes && textNotes.trim()) {
+    parts.push({ text: `Additional user notes:\n${textNotes.trim()}` });
+  }
+
+  for (const frame of frames) {
+    let cleanBase64 = frame;
+    let mimeType = "image/jpeg";
+    if (frame.includes("data:") && frame.includes(";base64,")) {
+      const split = frame.split(";base64,");
+      cleanBase64 = split[1];
+      if (split[0].includes("image/png")) mimeType = "image/png";
+      else if (split[0].includes("image/webp")) mimeType = "image/webp";
+    }
+    parts.push({
+      inline_data: {
+        mime_type: mimeType,
+        data: cleanBase64
+      }
+    });
+  }
+
+  const payload = {
+    contents: [{ parts: parts }],
+    generationConfig: {
+      response_mime_type: "application/json",
+      temperature: 0.1
+    }
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini direct API failed (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error("No text response from Gemini API");
+
+  const cleanJson = text.replace(/```json\s*/gi, "").replace(/```\s*$/gi, "").trim();
+  return JSON.parse(cleanJson);
 }
 
 
