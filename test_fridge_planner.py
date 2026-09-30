@@ -95,6 +95,41 @@ def test_generate_meal_plan_with_date():
     assert "01 Oct" in days[1]
     print("[OK] Meal plan with dynamic start_date verified: days properly formatted with weekday and calendar date")
 
+def test_indian_egg_free_elderly_member():
+    sample_res = client.get("/api/sample-data")
+    sample_data = sample_res.json()
+    
+    mother = next((m for m in sample_data["household"] if "Mother" in m["name"]), None)
+    assert mother is not None, "Mother should be present in sample household"
+    assert "Egg-Free (No Eggs)" in mother["dietary_needs"]
+    assert "Indian Cuisine Only" in mother["dietary_needs"]
+    
+    payload = {
+        "household": sample_data["household"],
+        "inventory": sample_data["inventory"],
+        "allow_repeats": True,
+        "plan_days": 7,
+        "start_date": "2026-09-30",
+        "notes_or_goals": "Strictly no eggs for Mother, only Indian food, no pasta or western dishes"
+    }
+    
+    response = client.post("/api/generate-plan", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    
+    mother_portions_found = 0
+    for day in data["plan_days"]:
+        for meal in day["meals"]:
+            for portion in meal.get("member_portions", []):
+                if portion["member_name"] == "Mother (Elderly)":
+                    mother_portions_found += 1
+                    custom = portion["customization"].lower()
+                    assert "egg-free" in custom or "zero eggs" in custom or "eggless" in custom or "indian" in custom
+    
+    assert mother_portions_found > 0, "Mother must have portions scheduled"
+    print(f"[OK] Elderly Indian egg-free member test passed: {mother_portions_found} portions verified with authentic eggless Indian meals!")
+
 if __name__ == "__main__":
     try:
         test_health()
@@ -102,6 +137,7 @@ if __name__ == "__main__":
         test_analyze_fridge_fallback()
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()
+        test_indian_egg_free_elderly_member()
         print("\nALL TESTS PASSED SUCCESSFULLY!")
     except Exception as e:
         print(f"\n[FAIL] Test failed: {e}", file=sys.stderr)

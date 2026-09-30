@@ -301,8 +301,23 @@ def mock_generate_meal_plan(req: GeneratePlanRequest) -> Dict[str, Any]:
         b_portions = []
         for m in members:
             if "Breakfast" in m.meals_eaten:
-                portion = "1 bowl / 2 eggs" if m.age >= 12 else "0.5 bowl / 1 egg"
-                custom = "Scrambled eggs + spinach" if any("keto" in d.lower() for d in m.dietary_needs) else "Greek yogurt or eggs on toast"
+                diet_str = " ".join(m.dietary_needs).lower()
+                notes_str = (m.dislikes_allergies or "").lower()
+                is_egg_free = any(k in diet_str or k in notes_str for k in ["egg-free", "no egg", "eggless", "vegan"])
+                is_indian = any(k in diet_str or k in notes_str for k in ["indian", "desi", "south asian"])
+                
+                portion = "1 medium warm bowl" if m.age >= 65 else ("1 bowl / 2 eggs" if m.age >= 12 else "0.5 bowl / 1 egg")
+                if is_indian and is_egg_free:
+                    custom = "Indian Eggless Breakfast: Poha with peanuts & mustard / Upma / Moong Dal Chilla / Paratha with spiced curd (Zero eggs)"
+                elif is_egg_free:
+                    custom = "Egg-free: Warm porridge / oats or Greek yogurt bowl with honey and fruit (Strictly egg-free)"
+                elif is_indian:
+                    custom = "Indian style: Egg bhurji with roti or Poha/Upma"
+                elif any("keto" in d.lower() for d in m.dietary_needs):
+                    custom = "Scrambled eggs + spinach"
+                else:
+                    custom = "Greek yogurt or eggs on toast"
+                    
                 b_portions.append({
                     "member_name": m.name,
                     "portion": portion,
@@ -339,8 +354,18 @@ def mock_generate_meal_plan(req: GeneratePlanRequest) -> Dict[str, Any]:
             lunch_ingr = [first_leftover.name, "Cooked Rice / Side Salad"]
             for m in members:
                 if "Lunch" in m.meals_eaten:
+                    diet_str = " ".join(m.dietary_needs).lower()
+                    notes_str = (m.dislikes_allergies or "").lower()
+                    is_indian = any(k in diet_str or k in notes_str for k in ["indian", "desi", "south asian"])
                     is_m_veggie = any("vegetarian" in d.lower() or "vegan" in d.lower() for d in m.dietary_needs)
-                    if is_m_veggie and any(meat in first_leftover.name.lower() for meat in ["chicken", "beef", "meat", "lamb", "pork"]):
+                    
+                    if is_indian:
+                        l_portions.append({
+                            "member_name": m.name,
+                            "portion": "1 gentle digestive plate" if m.age >= 65 else "1 plate",
+                            "customization": "Authentic Indian Meal: Steamed Basmati Rice or Roti with Yellow Moong Dal Tadka & Seasonal Sabzi (Egg-free, zero pasta/western)"
+                        })
+                    elif is_m_veggie and any(meat in first_leftover.name.lower() for meat in ["chicken", "beef", "meat", "lamb", "pork"]):
                         l_portions.append({
                             "member_name": m.name,
                             "portion": "1 plate",
@@ -349,7 +374,7 @@ def mock_generate_meal_plan(req: GeneratePlanRequest) -> Dict[str, Any]:
                     else:
                         l_portions.append({
                             "member_name": m.name,
-                            "portion": "1 generous portion" if m.age >= 14 else "0.6 portion",
+                            "portion": "0.85 portion" if m.age >= 65 else ("1 generous portion" if m.age >= 14 else "0.6 portion"),
                             "customization": "Portion calibrated to age and activity level"
                         })
         elif idx == 1 and len(leftovers) > 1:
@@ -361,11 +386,29 @@ def mock_generate_meal_plan(req: GeneratePlanRequest) -> Dict[str, Any]:
             lunch_ingr = [second_leftover.name, "Eggs", "Bell Peppers"]
             for m in members:
                 if "Lunch" in m.meals_eaten:
-                    l_portions.append({
-                        "member_name": m.name,
-                        "portion": "1 bowl" if m.age >= 12 else "0.5 bowl",
-                        "customization": "Mild soy sauce for kids; extra chilli flakes for adults"
-                    })
+                    diet_str = " ".join(m.dietary_needs).lower()
+                    notes_str = (m.dislikes_allergies or "").lower()
+                    is_indian = any(k in diet_str or k in notes_str for k in ["indian", "desi", "south asian"])
+                    is_egg_free = any(k in diet_str or k in notes_str for k in ["egg-free", "no egg", "eggless", "vegan"])
+                    
+                    if is_indian:
+                        l_portions.append({
+                            "member_name": m.name,
+                            "portion": "1 comforting warm plate" if m.age >= 65 else "1 bowl",
+                            "customization": "Indian Warm Lunch: Khichdi with mild cumin tempering & fresh cucumber salad / raita (No eggs, no pasta)"
+                        })
+                    elif is_egg_free:
+                        l_portions.append({
+                            "member_name": m.name,
+                            "portion": "1 bowl",
+                            "customization": "Egg-free alternative: Wok-fry rice with crispy tofu / veggies (omit eggs)"
+                        })
+                    else:
+                        l_portions.append({
+                            "member_name": m.name,
+                            "portion": "0.85 bowl" if m.age >= 65 else ("1 bowl" if m.age >= 12 else "0.5 bowl"),
+                            "customization": "Mild soy sauce for kids; extra chilli flakes for adults"
+                        })
         else:
             if req.allow_repeats and idx % 2 == 1:
                 lunch_name = "Planned Leftovers / Meal Prep from Previous Night"
@@ -382,11 +425,21 @@ def mock_generate_meal_plan(req: GeneratePlanRequest) -> Dict[str, Any]:
             
             for m in members:
                 if "Lunch" in m.meals_eaten:
-                    l_portions.append({
-                        "member_name": m.name,
-                        "portion": "1 plate" if m.age >= 12 else "0.6 portion",
-                        "customization": f"Portion scaled for {m.name} ({m.age}yo)"
-                    })
+                    diet_str = " ".join(m.dietary_needs).lower()
+                    notes_str = (m.dislikes_allergies or "").lower()
+                    is_indian = any(k in diet_str or k in notes_str for k in ["indian", "desi", "south asian"])
+                    if is_indian:
+                        l_portions.append({
+                            "member_name": m.name,
+                            "portion": "1 gentle digestive plate" if m.age >= 65 else "1 plate",
+                            "customization": "Traditional Indian Lunch: Fresh Phulka / Roti with Paneer Bhurji (eggless) or spiced Aloo Matar"
+                        })
+                    else:
+                        l_portions.append({
+                            "member_name": m.name,
+                            "portion": "0.85 portion" if m.age >= 65 else ("1 plate" if m.age >= 12 else "0.6 portion"),
+                            "customization": f"Portion scaled for {m.name} ({m.age}yo)"
+                        })
         
         if l_portions:
             meals.append({
@@ -431,15 +484,25 @@ def mock_generate_meal_plan(req: GeneratePlanRequest) -> Dict[str, Any]:
             
         for m in members:
             if "Dinner" in m.meals_eaten:
+                diet_str = " ".join(m.dietary_needs).lower()
+                notes_str = (m.dislikes_allergies or "").lower()
+                is_indian = any(k in diet_str or k in notes_str for k in ["indian", "desi", "south asian"])
                 is_m_veggie = any("vegetarian" in d.lower() or "vegan" in d.lower() for d in m.dietary_needs)
-                if is_m_veggie and "chicken" in d_name.lower():
+                
+                if is_indian:
+                    d_portions.append({
+                        "member_name": m.name,
+                        "portion": "1 wholesome plate (gentle spices, easy digestion)" if m.age >= 65 else "1 full plate",
+                        "customization": "Traditional Indian Thali: Roti or Jeera Rice with Paneer Curry / Dal Palak (Strictly egg-free, zero pasta/western)"
+                    })
+                elif is_m_veggie and "chicken" in d_name.lower():
                     d_portions.append({
                         "member_name": m.name,
                         "portion": "1 full plate",
                         "customization": "Vegetarian Alternative: Swap chicken for seared paneer, halloumi, or seasoned egg/tofu cutlet."
                     })
                 else:
-                    portion_desc = f"{1.0 if m.age >= 18 else (0.6 if m.age < 12 else 0.85)} adult portion"
+                    portion_desc = f"{'0.85' if m.age >= 65 else ('1.0' if m.age >= 18 else ('0.6' if m.age < 12 else '0.85'))} adult portion"
                     d_portions.append({
                         "member_name": m.name,
                         "portion": portion_desc,
@@ -631,6 +694,17 @@ def get_sample_data():
                 "meals_eaten": ["Breakfast", "Lunch", "Dinner", "Snack"],
                 "calorie_target": 1600,
                 "activity_level": "Active"
+            },
+            {
+                "id": "member-4",
+                "name": "Mother (Elderly)",
+                "age": 72,
+                "sex": "Female",
+                "dietary_needs": ["Vegetarian", "Egg-Free (No Eggs)", "Indian Cuisine Only", "No Pasta / Western Food"],
+                "dislikes_allergies": "Strictly no eggs, only Indian home food (dal, sabzi, roti, khichdi), no western food or pasta, mild gentle spice",
+                "meals_eaten": ["Breakfast", "Lunch", "Dinner"],
+                "calorie_target": 1700,
+                "activity_level": "Sedentary"
             }
         ],
         "inventory": mock_analyze_fridge_image()
@@ -806,8 +880,10 @@ Your mission is to generate a comprehensive 7-day personalized household meal pl
    - Raw Ingredients (Transform these into delicious, practical meals; provide preparation steps).
 3. Constraints:
    - Meal items CAN be repeated across days (e.g. batch cooking dinner and eating remainder for next day's lunch).
-   - STRICT DIETARY SAFETY: If an individual is Vegetarian, Halal, Gluten-Free, or has Nut Allergies, they MUST NOT be assigned food violating their needs. Provide clear customizations or alternative substitutes for individuals with conflicting dietary needs.
-   - PORTION SIZING: Clearly specify portions customized to each person's age and sex (e.g. adult male active vs 8-year-old child).
+   - STRICT DIETARY & CULTURAL SAFETY: If an individual is Vegetarian, Halal, Gluten-Free, or has Nut Allergies, they MUST NOT be assigned food violating their needs.
+   - For members with "Egg-Free / No Eggs" or "no eggs", NEVER assign eggs or egg-containing foods in their portions.
+   - For members requesting "Indian Cuisine Only" or "No Pasta / Western Food", ALWAYS provide an authentic Indian meal/alternative in their portion customization (e.g., Dal Tadka, Khichdi, Sabzi with Roti/Basmati Rice, Poha, Upma, Chilla, Paneer Curry) without pasta, pizza, burgers, or western dishes, even when the rest of the family eats western food.
+   - PORTION SIZING & DIGESTIBILITY: Clearly specify portions customized to each person's age and sex (adjusting digestibility and portion sizes for seniors/elderly 65+).
 """
         user_prompt = f"""
 HOUSEHOLD MEMBERS:

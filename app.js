@@ -2,6 +2,9 @@
 
 const DIETARY_OPTIONS = [
   "Vegetarian",
+  "Egg-Free (No Eggs)",
+  "Indian Cuisine Only",
+  "No Pasta / Western Food",
   "Vegan",
   "Halal",
   "Kosher",
@@ -12,6 +15,7 @@ const DIETARY_OPTIONS = [
   "Nut-Free",
   "Diabetic-Friendly",
   "Low-Sodium",
+  "Jain (No Root Veg)",
   "Pescatarian"
 ];
 
@@ -314,6 +318,38 @@ function initDietaryChips() {
     };
     container.appendChild(chip);
   });
+}
+
+function addElderlyIndianMotherPreset() {
+  const motherMember = {
+    id: `member-${Date.now()}`,
+    name: "Mother",
+    age: 72,
+    sex: "Female",
+    activity_level: "Sedentary",
+    dietary_needs: [
+      "Vegetarian",
+      "Egg-Free (No Eggs)",
+      "Indian Cuisine Only",
+      "No Pasta / Western Food"
+    ],
+    dislikes_allergies: "Strictly no eggs (eggless), only Indian home food (dal, sabzi, roti, khichdi, poha), no western food or pasta, mild gentle spice.",
+    meals_eaten: ["Breakfast", "Lunch", "Dinner"],
+    calorie_target: 1700
+  };
+
+  const existingIdx = appState.household.findIndex(m => m.name.toLowerCase().includes("mother") || m.name.toLowerCase().includes("mom"));
+  if (existingIdx >= 0) {
+    appState.household[existingIdx] = motherMember;
+    showToast("Updated Mother's profile with Indian & Egg-Free preferences!", "success");
+  } else {
+    appState.household.push(motherMember);
+    showToast("Added Mother's profile (72yo, Indian Cuisine Only, Egg-Free, No Pasta)!", "success");
+  }
+
+  saveHouseholdToStorage();
+  renderHousehold();
+  updateHeaderCounters();
 }
 
 function openAddMemberModal() {
@@ -763,8 +799,11 @@ ${daysList.map((d, i) => `Day ${i+1}: "${d.day}"`).join("\n")}
 RULES:
 1. Prioritize cooked leftovers on Day 1 & Day 2 to prevent spoilage.
 2. For raw ingredients, suggest specific recipes with prep time and instructions.
-3. Portion according to each individual's age and sex.
-4. Strictly honor dietary restrictions (e.g. Vegetarian, Halal, Nut-free).
+3. Portion according to each individual's age and sex (adjusting portion sizes and digestibility for seniors/elderly).
+4. Strictly honor dietary restrictions, allergies, and cultural preferences:
+   - For members with "Egg-Free / No Eggs" or "no eggs", NEVER assign eggs or egg-containing foods in their portions.
+   - For members with "Indian Cuisine Only" or "No Pasta / Western Food", ALWAYS provide an authentic Indian meal/alternative in their portion customization (e.g., Dal Tadka, Khichdi, Sabzi with Roti/Basmati Rice, Poha, Upma, Chilla, Paneer Curry) without pasta, pizza, burgers, or western salads, even when the rest of the family eats western food.
+   - For elderly/senior members (e.g. 65+), ensure meals are gentle, warm, and easy to digest with mild spices.
 
 Output ONLY JSON matching:
 {
@@ -1165,11 +1204,30 @@ function generateClientFallbackPlan(req) {
     const meals = [];
 
     // 1. Breakfast
-    const bPortions = members.filter(m => (m.meals_eaten || []).includes("Breakfast")).map(m => ({
-      member_name: m.name,
-      portion: m.age >= 12 ? "1 bowl / 2 eggs" : "0.5 bowl / 1 egg",
-      customization: (m.dietary_needs || []).includes("Low-Carb / Keto") ? "Scrambled eggs + spinach" : "Greek yogurt or eggs on toast"
-    }));
+    const bPortions = members.filter(m => (m.meals_eaten || []).includes("Breakfast")).map(m => {
+      const isEggFree = (m.dietary_needs || []).some(d => d.toLowerCase().includes("egg-free") || d.toLowerCase().includes("no egg")) || (m.dislikes_allergies || "").toLowerCase().includes("no egg") || (m.dislikes_allergies || "").toLowerCase().includes("eggless");
+      const isIndian = (m.dietary_needs || []).some(d => d.toLowerCase().includes("indian")) || (m.dislikes_allergies || "").toLowerCase().includes("indian");
+      
+      let custom = "";
+      let portion = m.age >= 12 ? (m.age >= 65 ? "1 medium warm bowl" : "1 bowl / 2 eggs") : "0.5 bowl / 1 egg";
+      if (isIndian && isEggFree) {
+        custom = "Indian Eggless Breakfast: Poha with mustard & peanuts / Upma / Moong Dal Chilla / Paratha with spiced curd (Zero eggs)";
+      } else if (isEggFree) {
+        custom = "Egg-free: Warm oats / chia bowl or Greek yogurt with honey and fruit (Strictly egg-free)";
+      } else if (isIndian) {
+        custom = "Indian style: Egg bhurji with roti or Poha/Upma";
+      } else if ((m.dietary_needs || []).includes("Low-Carb / Keto")) {
+        custom = "Scrambled eggs + spinach";
+      } else {
+        custom = "Greek yogurt or eggs on toast";
+      }
+
+      return {
+        member_name: m.name,
+        portion: portion,
+        customization: custom
+      };
+    });
 
     if (bPortions.length > 0) {
       meals.push({
@@ -1204,10 +1262,19 @@ function generateClientFallbackPlan(req) {
       ing = [first.name, "Cooked Rice / Side Salad"];
       members.filter(m => (m.meals_eaten || []).includes("Lunch")).forEach(m => {
         const isVeg = (m.dietary_needs || []).some(d => d.toLowerCase().includes("veg"));
-        if (isVeg && first.name.toLowerCase().includes("chicken")) {
+        const isEggFree = (m.dietary_needs || []).some(d => d.toLowerCase().includes("egg-free") || d.toLowerCase().includes("no egg")) || (m.dislikes_allergies || "").toLowerCase().includes("no egg") || (m.dislikes_allergies || "").toLowerCase().includes("eggless");
+        const isIndian = (m.dietary_needs || []).some(d => d.toLowerCase().includes("indian")) || (m.dislikes_allergies || "").toLowerCase().includes("indian");
+
+        if (isIndian) {
+          lPortions.push({
+            member_name: m.name,
+            portion: m.age >= 65 ? "1 gentle digestive plate" : "1 plate",
+            customization: "Authentic Indian Meal: Steamed Basmati Rice or Roti with Yellow Moong Dal Tadka & Seasonal Sabzi (Egg-free, zero pasta/western)"
+          });
+        } else if (isVeg && first.name.toLowerCase().includes("chicken")) {
           lPortions.push({ member_name: m.name, portion: "1 plate", customization: "Vegetarian alternative: Veggie stir-fry rice" });
         } else {
-          lPortions.push({ member_name: m.name, portion: m.age >= 14 ? "1 generous portion" : "0.6 portion", customization: "Standard portion" });
+          lPortions.push({ member_name: m.name, portion: m.age >= 14 ? (m.age >= 65 ? "0.85 portion" : "1 generous portion") : "0.6 portion", customization: "Standard portion" });
         }
       });
     } else if (idx === 1 && leftovers.length > 1) {
@@ -1219,7 +1286,24 @@ function generateClientFallbackPlan(req) {
       summary = "Wok-fry cooked rice or pasta with 2 beaten eggs, sliced bell peppers, and soy sauce.";
       ing = [second.name, "Eggs", "Bell Peppers"];
       members.filter(m => (m.meals_eaten || []).includes("Lunch")).forEach(m => {
-        lPortions.push({ member_name: m.name, portion: m.age >= 12 ? "1 bowl" : "0.5 bowl", customization: "Calibrated to age & appetite" });
+        const isIndian = (m.dietary_needs || []).some(d => d.toLowerCase().includes("indian")) || (m.dislikes_allergies || "").toLowerCase().includes("indian");
+        const isEggFree = (m.dietary_needs || []).some(d => d.toLowerCase().includes("egg-free") || d.toLowerCase().includes("no egg")) || (m.dislikes_allergies || "").toLowerCase().includes("no egg") || (m.dislikes_allergies || "").toLowerCase().includes("eggless");
+
+        if (isIndian) {
+          lPortions.push({
+            member_name: m.name,
+            portion: m.age >= 65 ? "1 comforting warm plate" : "1 bowl",
+            customization: "Indian Warm Lunch: Khichdi with mild cumin tempering & fresh cucumber salad / raita (No eggs, no pasta)"
+          });
+        } else if (isEggFree) {
+          lPortions.push({
+            member_name: m.name,
+            portion: "1 bowl",
+            customization: "Egg-free alternative: Wok-fry rice with crispy tofu / veggies (omit eggs)"
+          });
+        } else {
+          lPortions.push({ member_name: m.name, portion: m.age >= 12 ? (m.age >= 65 ? "0.85 bowl" : "1 bowl") : "0.5 bowl", customization: "Calibrated to age & appetite" });
+        }
       });
     } else {
       if (req.allow_repeats && idx % 2 === 1) {
@@ -1238,7 +1322,16 @@ function generateClientFallbackPlan(req) {
         ing = ["Eggs", "Cheddar Cheese", "Bell Peppers"];
       }
       members.filter(m => (m.meals_eaten || []).includes("Lunch")).forEach(m => {
-        lPortions.push({ member_name: m.name, portion: m.age >= 12 ? "1 plate" : "0.6 portion", customization: `Scaled for ${m.name}` });
+        const isIndian = (m.dietary_needs || []).some(d => d.toLowerCase().includes("indian")) || (m.dislikes_allergies || "").toLowerCase().includes("indian");
+        if (isIndian) {
+          lPortions.push({
+            member_name: m.name,
+            portion: m.age >= 65 ? "1 gentle digestive plate" : "1 plate",
+            customization: "Traditional Indian Lunch: Fresh Phulka / Roti with Paneer Bhurji (eggless) or spiced Aloo Matar"
+          });
+        } else {
+          lPortions.push({ member_name: m.name, portion: m.age >= 12 ? (m.age >= 65 ? "0.85 portion" : "1 plate") : "0.6 portion", customization: `Scaled for ${m.name}` });
+        }
       });
     }
 
@@ -1261,7 +1354,16 @@ function generateClientFallbackPlan(req) {
     const dPortions = [];
     members.filter(m => (m.meals_eaten || []).includes("Dinner")).forEach(m => {
       const isVeg = (m.dietary_needs || []).some(d => d.toLowerCase().includes("veg"));
-      if (isVeg && rec.name.toLowerCase().includes("chicken")) {
+      const isIndian = (m.dietary_needs || []).some(d => d.toLowerCase().includes("indian")) || (m.dislikes_allergies || "").toLowerCase().includes("indian");
+      const isEggFree = (m.dietary_needs || []).some(d => d.toLowerCase().includes("egg-free") || d.toLowerCase().includes("no egg")) || (m.dislikes_allergies || "").toLowerCase().includes("no egg") || (m.dislikes_allergies || "").toLowerCase().includes("eggless");
+
+      if (isIndian) {
+        dPortions.push({
+          member_name: m.name,
+          portion: m.age >= 65 ? "1 wholesome plate (gentle spices, easy digestion)" : "1 full plate",
+          customization: "Traditional Indian Thali: Roti or Jeera Rice with Paneer Curry / Dal Palak (Strictly egg-free, zero pasta/western)"
+        });
+      } else if (isVeg && rec.name.toLowerCase().includes("chicken")) {
         dPortions.push({
           member_name: m.name,
           portion: "1 full plate",
@@ -1270,7 +1372,7 @@ function generateClientFallbackPlan(req) {
       } else {
         dPortions.push({
           member_name: m.name,
-          portion: `${m.age >= 18 ? '1.0' : (m.age < 12 ? '0.6' : '0.85')} adult portion`,
+          portion: `${m.age >= 18 ? (m.age >= 65 ? '0.85' : '1.0') : (m.age < 12 ? '0.6' : '0.85')} adult portion`,
           customization: `Balanced for ${m.age}yo ${m.sex}; honors ${(m.dietary_needs || []).join(', ') || 'Standard diet'}`
         });
       }

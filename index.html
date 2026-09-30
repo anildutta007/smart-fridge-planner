@@ -105,6 +105,10 @@
           <p class="text-xs text-slate-500 mt-0.5">Customize age, sex, dietary requirements, and meal counts so the AI portions and verifies safety for each individual.</p>
         </div>
         <div class="flex items-center space-x-3 w-full sm:w-auto">
+          <button onclick="addElderlyIndianMotherPreset()" class="text-xs font-semibold px-3 py-2 rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 transition flex items-center space-x-1.5 shadow-sm" title="Quick-add Mother (Elderly, No Eggs, Indian Meals Only, No Pasta)">
+            <i class="ph-bold ph-heart"></i>
+            <span>+ Add Mother (Indian / No Eggs)</span>
+          </button>
           <button onclick="loadSampleHousehold()" class="text-xs font-semibold px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition flex items-center space-x-1.5">
             <i class="ph-bold ph-sparkle"></i>
             <span>Load Sample Family</span>
@@ -402,7 +406,10 @@
 
         <!-- Dietary Needs Chips -->
         <div>
-          <label class="block font-semibold text-slate-700 mb-1">Dietary Requirements & Restrictions</label>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block font-semibold text-slate-700">Dietary & Cultural Preferences</label>
+            <span class="text-[11px] text-slate-400">Click to toggle</span>
+          </div>
           <div class="flex flex-wrap gap-1.5 pt-1" id="dietaryChipsSelector">
             <!-- Rendered by JS -->
           </div>
@@ -410,8 +417,9 @@
 
         <!-- Dislikes & Specific Notes -->
         <div>
-          <label class="block font-semibold text-slate-700 mb-1">Allergies / Dislikes / Notes</label>
-          <input type="text" id="memberFormNotes" placeholder="e.g. Nut allergy, hates mushrooms, mild spice only" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          <label class="block font-semibold text-slate-700 mb-1">Cuisine Style, Allergies & Dislikes</label>
+          <input type="text" id="memberFormNotes" placeholder="e.g. Only Indian meals, strictly no eggs, no pasta/western food, mild spice" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          <p class="text-[11px] text-slate-400 mt-1">Specify cultural food rules (e.g. Traditional Indian only) or strict dislikes (e.g. no pasta, no eggs, no western food).</p>
         </div>
 
         <!-- Submit buttons -->
