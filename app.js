@@ -34,6 +34,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initDropZone();
   initDietaryChips();
   initApiKeyField();
+  initPlanDate();
   
   // Try loading from localStorage, otherwise load sample data
   const savedHousehold = localStorage.getItem("smartfridge_household");
@@ -747,11 +748,17 @@ Respond with ONLY valid JSON:
 
 async function callGeminiPlanDirect(apiKey, req) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+  const daysList = getFormattedWeekDays(req.start_date, req.plan_days || 7);
   const prompt = `You are a family chef and dietitian.
 Generate a comprehensive 7-day personalized household meal plan based on:
 HOUSEHOLD: ${JSON.stringify(req.household)}
 INVENTORY: ${JSON.stringify(req.inventory)}
-PREFERENCES: Allow repeats=${req.allow_repeats}, start_day=${req.start_day}
+PREFERENCES: Allow repeats=${req.allow_repeats}, Starting Date=${req.start_date} (${req.start_day})
+
+CALENDAR DATES & WEEKDAYS:
+The plan MUST start on ${daysList[0].day}.
+You MUST label the "day" field for each day using the consecutive calendar weekdays and dates:
+${daysList.map((d, i) => `Day ${i+1}: "${d.day}"`).join("\n")}
 
 RULES:
 1. Prioritize cooked leftovers on Day 1 & Day 2 to prevent spoilage.
@@ -763,7 +770,7 @@ Output ONLY JSON matching:
 {
   "plan_days": [
     {
-      "day": "Monday",
+      "day": "${daysList[0].day}",
       "meals": [
         {
           "slot": "Breakfast" | "Lunch" | "Dinner",
@@ -926,6 +933,119 @@ async function generatePlanTrigger() {
   // Switch to Plan tab
   switchTab("plan");
 
+// Date Picker & Calendar Weekday Initializers
+function initPlanDate() {
+  const dateInput = document.getElementById("planStartDateInput");
+  if (dateInput) {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    dateInput.value = `${yyyy}-${mm}-${dd}`;
+    updateStartWeekdayLabel();
+  }
+}
+
+function setPlanDateToToday() {
+  const dateInput = document.getElementById("planStartDateInput");
+  if (dateInput) {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    dateInput.value = `${yyyy}-${mm}-${dd}`;
+    updateStartWeekdayLabel();
+    showToast("Plan date reset to Today!", "info");
+  }
+}
+
+function updateStartWeekdayLabel() {
+  const dateInput = document.getElementById("planStartDateInput");
+  const label = document.getElementById("resolvedStartWeekday");
+  if (!dateInput || !label) return;
+
+  const val = dateInput.value;
+  if (!val) {
+    label.textContent = "";
+    return;
+  }
+
+  const parts = val.split("-");
+  if (parts.length < 3) return;
+  const d = new Date(parts[0], parts[1] - 1, parts[2]);
+  const weekday = d.toLocaleDateString("en-GB", { weekday: "long" });
+  const formattedDate = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const tomorrow = new Date(today.getTime() + 86400000);
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+
+  if (isToday) {
+    label.textContent = `${weekday}, ${formattedDate} (Today)`;
+  } else if (isTomorrow) {
+    label.textContent = `${weekday}, ${formattedDate} (Tomorrow)`;
+  } else {
+    label.textContent = `${weekday}, ${formattedDate}`;
+  }
+}
+
+function getFormattedWeekDays(startDateStr, planDays = 7) {
+  let baseDate = new Date();
+  if (startDateStr) {
+    const parts = startDateStr.split("-");
+    if (parts.length === 3) {
+      baseDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    }
+  }
+
+  const days = [];
+  const today = new Date();
+  const todayStr = today.toDateString();
+  const tomorrowStr = new Date(today.getTime() + 86400000).toDateString();
+
+  for (let i = 0; i < planDays; i++) {
+    const d = new Date(baseDate);
+    d.setDate(baseDate.getDate() + i);
+
+    const weekday = d.toLocaleDateString("en-GB", { weekday: "long" });
+    const formatted = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    
+    let tag = "";
+    if (d.toDateString() === todayStr) {
+      tag = " (Today)";
+    } else if (d.toDateString() === tomorrowStr) {
+      tag = " (Tomorrow)";
+    }
+
+    days.push({
+      index: i,
+      day: `${weekday}, ${formatted}${tag}`,
+      weekday: weekday,
+      formattedDate: formatted,
+      isoDate: d.toISOString().split("T")[0]
+    });
+  }
+  return days;
+}
+
+// ----------------- Plan Generation with Auto-Fallback -----------------
+async function generatePlanTrigger() {
+  if (appState.household.length === 0) {
+    showToast("Please add at least one household member before generating a meal plan.", "warning");
+    switchTab("members");
+    return;
+  }
+
+  if (appState.inventory.length === 0) {
+    showToast("Your fridge inventory is empty! Add items or click 'Quick Sample Fridge'.", "warning");
+    switchTab("fridge");
+    return;
+  }
+
+  // Switch to Plan tab
+  switchTab("plan");
+
   const spinner = document.getElementById("planLoadingSpinner");
   const daysContainer = document.getElementById("planDaysContainer");
   const summaryBox = document.getElementById("planSummaryBox");
@@ -937,15 +1057,20 @@ async function generatePlanTrigger() {
   btnRegen.disabled = true;
 
   const allowRepeats = document.getElementById("chkAllowRepeats").checked;
-  const startDay = document.getElementById("selStartDay").value;
+  const dateInput = document.getElementById("planStartDateInput");
+  const startDateStr = dateInput && dateInput.value ? dateInput.value : new Date().toISOString().split("T")[0];
+  const parts = startDateStr.split("-");
+  const baseD = new Date(parts[0], parts[1] - 1, parts[2]);
+  const startWeekday = baseD.toLocaleDateString("en-GB", { weekday: "long" });
 
   const requestPayload = {
     household: appState.household,
     inventory: appState.inventory,
     allow_repeats: allowRepeats,
     plan_days: 7,
-    start_day: startDay,
-    notes_or_goals: "Prioritize cooked leftovers immediately; portion meals accurately to age and sex; strictly ensure no allergen/dietary conflicts; turn raw ingredients into full recipes."
+    start_date: startDateStr,
+    start_day: startWeekday,
+    notes_or_goals: `Prioritize cooked leftovers immediately on early days; plan starts on ${startWeekday}, ${startDateStr}; portion meals accurately to age and sex; strictly ensure no allergen/dietary conflicts; turn raw ingredients into full recipes.`
   };
 
   try {
@@ -1019,11 +1144,7 @@ async function generatePlanTrigger() {
 
 // Client-side meal planning engine (offline fallback)
 function generateClientFallbackPlan(req) {
-  const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-  let startIdx = daysOfWeek.indexOf(req.start_day);
-  if (startIdx < 0) startIdx = 0;
-  const orderedDays = daysOfWeek.slice(startIdx).concat(daysOfWeek.slice(0, startIdx));
-
+  const formattedDays = getFormattedWeekDays(req.start_date, req.plan_days || 7);
   const leftovers = (req.inventory || []).filter(i => i.category === "cooked_leftover");
   const rawItems = (req.inventory || []).filter(i => i.category === "raw_ingredient");
   const members = req.household || [];
@@ -1040,7 +1161,7 @@ function generateClientFallbackPlan(req) {
     { name: "Sunday Roast Cleanup & Golden Frittata Bake", origin: "Remaining weekly produce & cheeses", prep: "25 mins", desc: "Combine all remaining weekly vegetables and cheeses in a comforting bake to ensure zero food waste.", ing: ["Remaining produce", "Eggs"] }
   ];
 
-  orderedDays.forEach((day, idx) => {
+  formattedDays.forEach((dayInfo, idx) => {
     const meals = [];
 
     // 1. Breakfast
@@ -1170,7 +1291,7 @@ function generateClientFallbackPlan(req) {
     }
 
     planDays.push({
-      day: day,
+      day: dayInfo.day,
       meals: meals
     });
   });

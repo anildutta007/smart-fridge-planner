@@ -128,7 +128,8 @@ class GeneratePlanRequest(BaseModel):
     ])
     allow_repeats: bool = True
     plan_days: int = 7
-    start_day: str = "Monday"
+    start_day: Optional[str] = "Today"
+    start_date: Optional[str] = None
     notes_or_goals: Optional[str] = "Minimize food waste and strictly honor dietary restrictions"
 
 # ----------------- Helper Functions -----------------
@@ -261,16 +262,27 @@ def mock_analyze_fridge_image() -> List[Dict[str, Any]]:
 
 def mock_generate_meal_plan(req: GeneratePlanRequest) -> Dict[str, Any]:
     """Generates an intelligent, rule-based 7-day meal plan prioritizing leftovers and matching dietary needs."""
-    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    from datetime import datetime, timedelta
     
-    # Adjust starting day if requested
-    if req.start_day in day_names:
-        start_idx = day_names.index(req.start_day)
-        ordered_days = day_names[start_idx:] + day_names[:start_idx]
-    else:
-        ordered_days = day_names
-    
-    ordered_days = ordered_days[:max(1, min(req.plan_days, 7))]
+    # Resolve real calendar dates and weekdays
+    try:
+        if req.start_date:
+            base_date = datetime.strptime(req.start_date.split("T")[0], "%Y-%m-%d")
+        else:
+            base_date = datetime.now()
+    except Exception:
+        base_date = datetime.now()
+
+    today_date = datetime.now().date()
+    ordered_days = []
+    for i in range(max(1, min(req.plan_days, 7))):
+        d = base_date + timedelta(days=i)
+        tag = ""
+        if d.date() == today_date:
+            tag = " (Today)"
+        elif d.date() == today_date + timedelta(days=1):
+            tag = " (Tomorrow)"
+        ordered_days.append(f"{d.strftime('%A, %d %b')}{tag}")
 
     # Identify leftovers vs raw ingredients
     leftovers = [i for i in req.inventory if i.category == "cooked_leftover"]

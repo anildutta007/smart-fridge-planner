@@ -294,13 +294,13 @@
             <span class="font-medium">Allow Meal Repeats / Batch Cooking (Recommended)</span>
           </label>
           <span class="text-slate-300">|</span>
-          <div class="flex items-center space-x-1.5">
-            <span class="font-medium">Week Start:</span>
-            <select id="selStartDay" class="border border-slate-200 rounded px-2 py-0.5 font-medium bg-slate-50">
-              <option value="Monday">Monday</option>
-              <option value="Sunday">Sunday</option>
-              <option value="Today">Today</option>
-            </select>
+          <div class="flex items-center space-x-2">
+            <span class="font-medium text-slate-700">Start Date:</span>
+            <input type="date" id="planStartDateInput" onchange="updateStartWeekdayLabel()" class="border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold bg-slate-50 text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-none shadow-sm cursor-pointer">
+            <button type="button" onclick="setPlanDateToToday()" title="Reset to today's date" class="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition">
+              Today
+            </button>
+            <span id="resolvedStartWeekday" class="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full"></span>
           </div>
         </div>
       </div>

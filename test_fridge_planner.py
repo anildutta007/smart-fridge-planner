@@ -70,12 +70,38 @@ def test_generate_meal_plan():
             
     print("[OK] 7-Day Meal Plan generation passed: 7 days planned with leftover priority and member portioning!")
 
+def test_generate_meal_plan_with_date():
+    sample_res = client.get("/api/sample-data")
+    sample_data = sample_res.json()
+    
+    payload = {
+        "household": sample_data["household"],
+        "inventory": sample_data["inventory"],
+        "allow_repeats": True,
+        "plan_days": 7,
+        "start_date": "2026-09-30",
+        "notes_or_goals": "Test dynamic dates"
+    }
+    
+    response = client.post("/api/generate-plan", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    days = [d["day"] for d in data["plan_days"]]
+    assert len(days) == 7
+    assert "Wednesday" in days[0]
+    assert "30 Sep" in days[0]
+    assert "Thursday" in days[1]
+    assert "01 Oct" in days[1]
+    print("[OK] Meal plan with dynamic start_date verified: days properly formatted with weekday and calendar date")
+
 if __name__ == "__main__":
     try:
         test_health()
         test_sample_data()
         test_analyze_fridge_fallback()
         test_generate_meal_plan()
+        test_generate_meal_plan_with_date()
         print("\nALL TESTS PASSED SUCCESSFULLY!")
     except Exception as e:
         print(f"\n[FAIL] Test failed: {e}", file=sys.stderr)
