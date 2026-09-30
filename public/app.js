@@ -131,18 +131,28 @@ function loadFamilyDataIntoState(family) {
     }
   }
 
-  if (appState.household.length === 0 && appState.inventory.length === 0) {
-    loadSampleAll();
-  } else {
-    renderHousehold();
-    renderInventory();
-    updateHeaderCounters();
-    if (appState.currentPlan) {
-      renderPlan(appState.currentPlan);
-    }
+  renderHousehold();
+  renderInventory();
+  updateHeaderCounters();
+  if (appState.currentPlan) {
+    renderPlan(appState.currentPlan);
   }
 
   updateHeaderFamilyBadge();
+}
+
+function clearAllFridgeItems() {
+  if (appState.inventory.length === 0) {
+    showToast("Fridge is already empty.", "info");
+    return;
+  }
+  if (confirm(`Remove all ${appState.inventory.length} items from your fridge inventory to start completely empty?`)) {
+    appState.inventory = [];
+    saveInventoryToStorage();
+    renderInventory();
+    updateHeaderCounters();
+    showToast("Fridge cleared! You can now add your own items or scan your fridge.", "success");
+  }
 }
 
 function updateHeaderFamilyBadge() {
@@ -1369,7 +1379,30 @@ async function analyzeFridgeAI() {
     }
 
     // 3. Smart offline heuristic fallback
-    const fallbackData = [
+    let fallbackData = [];
+    if (textNotes) {
+      textNotes.split("\n").filter(l => l.trim()).forEach((line, i) => {
+        const isCooked = /cooked|leftover|curry|rice|pasta|stew|bake|biryani|roast|soup/i.test(line);
+        fallbackData.push({
+          id: `custom-${Date.now()}-${i+1}`,
+          name: line.trim(),
+          category: isCooked ? "cooked_leftover" : "raw_ingredient",
+          quantity: "1 portion",
+          portions: 2.0,
+          urgency: isCooked ? "high" : "medium",
+          storage_type: "Fridge",
+          notes: "Entered from notes"
+        });
+      });
+      appState.inventory = fallbackData;
+      saveInventoryToStorage();
+      renderInventory();
+      updateHeaderCounters();
+      showToast(`Added ${fallbackData.length} items from your notes to the fridge!`, "success");
+      return;
+    }
+
+    fallbackData = [
       { id: "item-1", name: "Leftover Pasta / Curry", category: "cooked_leftover", quantity: "2 portions", portions: 2.0, urgency: "high", storage_type: "Fridge", notes: "Consume within 1-2 days" },
       { id: "item-2", name: "Cooked Rice / Grains", category: "cooked_leftover", quantity: "2 cups", portions: 2.0, urgency: "high", storage_type: "Fridge", notes: "Eat early in the week" },
       { id: "item-3", name: "Fresh Eggs", category: "raw_ingredient", quantity: "6 eggs", portions: 6.0, urgency: "medium", storage_type: "Fridge", notes: "Breakfasts or frittatas" },
@@ -1377,21 +1410,6 @@ async function analyzeFridgeAI() {
       { id: "item-5", name: "Mixed Vegetables (Broccoli, Peppers)", category: "raw_ingredient", quantity: "2 portions", portions: 3.0, urgency: "medium", storage_type: "Fridge", notes: "Fresh produce" },
       { id: "item-6", name: "Cheddar Cheese", category: "raw_ingredient", quantity: "200g", portions: 4.0, urgency: "low", storage_type: "Fridge", notes: "Dairy staple" }
     ];
-    if (textNotes) {
-      textNotes.split("\n").filter(l => l.trim()).forEach((line, i) => {
-        const isCooked = /cooked|leftover|curry|rice|pasta|stew/i.test(line);
-        fallbackData.unshift({
-          id: `custom-${i+1}`,
-          name: line.trim(),
-          category: isCooked ? "cooked_leftover" : "raw_ingredient",
-          quantity: "1 portion",
-          portions: 2.0,
-          urgency: isCooked ? "high" : "medium",
-          storage_type: "Fridge",
-          notes: "From user notes"
-        });
-      });
-    }
 
     appState.inventory = fallbackData;
     saveInventoryToStorage();

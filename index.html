@@ -235,11 +235,15 @@
             <p class="text-xs text-slate-500">Edit quantities, categories, or urgency before generating your meal plan.</p>
           </div>
           
-          <!-- Filter Buttons -->
+          <!-- Filter & Action Buttons -->
           <div class="flex items-center space-x-2 text-xs">
             <button onclick="filterInventory('all')" id="filterAll" class="px-2.5 py-1 rounded-md font-semibold bg-slate-900 text-white">All</button>
             <button onclick="filterInventory('cooked_leftover')" id="filterLeftovers" class="px-2.5 py-1 rounded-md font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Cooked Leftovers 🚨</button>
             <button onclick="filterInventory('raw_ingredient')" id="filterRaw" class="px-2.5 py-1 rounded-md font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200">Raw Ingredients 🥦</button>
+            <button onclick="clearAllFridgeItems()" class="px-2.5 py-1 rounded-md font-semibold bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 flex items-center space-x-1 transition ml-2" title="Wipe all items to start with an empty fridge">
+              <i class="ph-bold ph-trash"></i>
+              <span>Clear Fridge</span>
+            </button>
           </div>
         </div>
 
