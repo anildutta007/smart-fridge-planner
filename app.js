@@ -198,9 +198,13 @@ function toggleVoiceRecording() {
     appState.speechRecognitionInstance.interimResults = true;
     appState.speechRecognitionInstance.lang = "en-US";
 
-    let initialText = textInput ? textInput.value : "";
-    if (initialText && !initialText.endsWith("\n") && !initialText.endsWith(", ")) {
-      initialText += ", ";
+    let initialText = textInput ? textInput.value.trim() : "";
+    if (initialText) {
+      if (!initialText.endsWith(",") && !initialText.endsWith("\n")) {
+        initialText += ", ";
+      } else if (initialText.endsWith(",")) {
+        initialText += " ";
+      }
     }
 
     appState.speechRecognitionInstance.onstart = () => {
@@ -222,7 +226,7 @@ function toggleVoiceRecording() {
         currentSessionTranscript += event.results[i][0].transcript;
       }
       if (textInput) {
-        textInput.value = (initialText + currentSessionTranscript).trim();
+        textInput.value = initialText + currentSessionTranscript;
       }
     };
 
@@ -280,6 +284,47 @@ function insertVoiceExample() {
 function clearVoiceInput() {
   const textInput = document.getElementById("voiceTranscriptInput");
   if (textInput) textInput.value = "";
+  showToast("Cleared voice text box.", "info");
+}
+
+// Normalized duplicate item check
+function normalizeFoodItemName(str) {
+  return (str || "")
+    .toLowerCase()
+    .replace(/[\(\)\[\]\{\}\.,;:\-_]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/ies\b/g, "y")
+    .replace(/es\b/g, "e")
+    .replace(/s\b/g, "");
+}
+
+function isDuplicateInventoryItem(newItem, existingInventory) {
+  if (!newItem || !newItem.name) return false;
+  if (!Array.isArray(existingInventory) || existingInventory.length === 0) return false;
+
+  const newNorm = normalizeFoodItemName(newItem.name);
+  const newStorage = (newItem.storage_type || "Fridge").toLowerCase();
+
+  return existingInventory.some(existing => {
+    const existingNorm = normalizeFoodItemName(existing.name);
+    const existingStorage = (existing.storage_type || "Fridge").toLowerCase();
+
+    // Compartment check (Fridge vs Freezer)
+    if (newStorage !== existingStorage) return false;
+
+    // Exact or singular/plural match
+    if (newNorm === existingNorm) return true;
+
+    // Substring match for phrases (e.g. "Courgette" vs "Fresh Courgettes")
+    if (newNorm.length >= 4 && existingNorm.length >= 4) {
+      if (newNorm.startsWith(existingNorm) || existingNorm.startsWith(newNorm)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
 }
 
 async function documentVoiceItems() {
@@ -337,21 +382,39 @@ async function documentVoiceItems() {
       return;
     }
 
-    // Add items to inventory
-    appState.inventory = [...items, ...appState.inventory];
-    saveActiveFamilyToStorage();
-    renderInventory();
-    updateHeaderCounters();
+    // Check for duplicates against existing inventory and skip already recorded items
+    const newItemsToAdd = [];
+    const skippedDuplicates = [];
 
-    // Clear transcript
-    const textInput = document.getElementById("voiceTranscriptInput");
-    if (textInput) textInput.value = "";
+    items.forEach(item => {
+      if (isDuplicateInventoryItem(item, appState.inventory)) {
+        skippedDuplicates.push(item.name);
+      } else {
+        newItemsToAdd.push(item);
+      }
+    });
 
-    const cookedCount = items.filter(i => i.category === "cooked_leftover").length;
-    const rawCount = items.filter(i => i.category === "raw_ingredient").length;
-    const freezerCount = items.filter(i => (i.storage_type || "").toLowerCase() === "freezer").length;
+    if (newItemsToAdd.length > 0) {
+      appState.inventory = [...newItemsToAdd, ...appState.inventory];
+      saveActiveFamilyToStorage();
+      renderInventory();
+      updateHeaderCounters();
+    }
 
-    showToast(`✨ Documented ${items.length} items (${cookedCount} Leftovers, ${rawCount} Raw${freezerCount > 0 ? `, ${freezerCount} in Freezer` : ''})!`, "success");
+    // Keep the spoken data in the window as requested!
+    // User can add more items by speaking again or typing, or clear when desired.
+
+    const cookedCount = newItemsToAdd.filter(i => i.category === "cooked_leftover").length;
+    const rawCount = newItemsToAdd.filter(i => i.category === "raw_ingredient").length;
+    const freezerCount = newItemsToAdd.filter(i => (i.storage_type || "").toLowerCase() === "freezer").length;
+
+    if (newItemsToAdd.length > 0 && skippedDuplicates.length > 0) {
+      showToast(`✨ Documented ${newItemsToAdd.length} new items (${cookedCount} Leftovers, ${rawCount} Raw${freezerCount > 0 ? `, ${freezerCount} in Freezer` : ""})! Skipped ${skippedDuplicates.length} already recorded: ${skippedDuplicates.join(", ")}.`, "success");
+    } else if (newItemsToAdd.length > 0) {
+      showToast(`✨ Documented ${newItemsToAdd.length} items (${cookedCount} Leftovers, ${rawCount} Raw${freezerCount > 0 ? `, ${freezerCount} in Freezer` : ""})!`, "success");
+    } else {
+      showToast(`ℹ️ All ${skippedDuplicates.length} items are already recorded in your inventory (skipped duplicates: ${skippedDuplicates.join(", ")}).`, "info");
+    }
   } catch (err) {
     console.error("Voice documentation failed:", err);
     showToast("Documentation complete.", "info");
@@ -585,15 +648,34 @@ function processTypedItems() {
     return;
   }
 
-  appState.inventory = [...items, ...appState.inventory];
-  saveActiveFamilyToStorage();
-  renderInventory();
-  updateHeaderCounters();
+  const newItemsToAdd = [];
+  const skippedDuplicates = [];
+
+  items.forEach(item => {
+    if (isDuplicateInventoryItem(item, appState.inventory)) {
+      skippedDuplicates.push(item.name);
+    } else {
+      newItemsToAdd.push(item);
+    }
+  });
+
+  if (newItemsToAdd.length > 0) {
+    appState.inventory = [...newItemsToAdd, ...appState.inventory];
+    saveActiveFamilyToStorage();
+    renderInventory();
+    updateHeaderCounters();
+  }
 
   const inputEl = document.getElementById("typedItemsInput");
   if (inputEl) inputEl.value = "";
 
-  showToast(`✨ Added ${items.length} food items to your inventory!`, "success");
+  if (newItemsToAdd.length > 0 && skippedDuplicates.length > 0) {
+    showToast(`✨ Added ${newItemsToAdd.length} new items (skipped ${skippedDuplicates.length} duplicates: ${skippedDuplicates.join(", ")})!`, "success");
+  } else if (newItemsToAdd.length > 0) {
+    showToast(`✨ Added ${newItemsToAdd.length} food items to your inventory!`, "success");
+  } else {
+    showToast(`ℹ️ All ${skippedDuplicates.length} items are already in your inventory (skipped duplicates).`, "info");
+  }
 }
 
 
