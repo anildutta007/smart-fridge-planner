@@ -1407,24 +1407,7 @@ async function analyzeFridgeAI() {
   }
 }
 
-// ----------------- Plan Generation with Auto-Fallback -----------------
-async function generatePlanTrigger() {
-  if (appState.household.length === 0) {
-    showToast("Please add at least one household member before generating a meal plan.", "warning");
-    switchTab("members");
-    return;
-  }
-
-  if (appState.inventory.length === 0) {
-    showToast("Your fridge inventory is empty! Add items or click 'Quick Sample Fridge'.", "warning");
-    switchTab("fridge");
-    return;
-  }
-
-  // Switch to Plan tab
-  switchTab("plan");
-
-// Date Picker & Calendar Weekday Initializers
+// ----------------- Date Picker & Calendar Weekday Initializers -----------------
 function initPlanDate() {
   const dateInput = document.getElementById("planStartDateInput");
   if (dateInput) {
