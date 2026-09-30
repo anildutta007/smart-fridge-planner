@@ -328,11 +328,15 @@ function isDuplicateInventoryItem(newItem, existingInventory) {
 }
 
 async function documentVoiceItems() {
-  const transcript = (document.getElementById("voiceTranscriptInput")?.value || "").trim();
+  const transcriptInput = document.getElementById("voiceTranscriptInput");
+  const transcript = (transcriptInput?.value || "").trim();
   if (!transcript) {
     showToast("Please speak some food items first or click 'Try Multi-Item Example'.", "warning");
     return;
   }
+
+  // Preserve the exact text in memory to guarantee it is NEVER wiped
+  const preservedTranscript = transcriptInput.value;
 
   const btn = document.getElementById("btnDocumentVoice");
   if (btn) {
@@ -401,8 +405,10 @@ async function documentVoiceItems() {
       updateHeaderCounters();
     }
 
-    // Keep the spoken data in the window as requested!
-    // User can add more items by speaking again or typing, or clear when desired.
+    // Explicitly guarantee spoken data stays in the window
+    if (transcriptInput) {
+      transcriptInput.value = preservedTranscript;
+    }
 
     const cookedCount = newItemsToAdd.filter(i => i.category === "cooked_leftover").length;
     const rawCount = newItemsToAdd.filter(i => i.category === "raw_ingredient").length;
@@ -419,6 +425,9 @@ async function documentVoiceItems() {
     console.error("Voice documentation failed:", err);
     showToast("Documentation complete.", "info");
   } finally {
+    if (transcriptInput && preservedTranscript) {
+      transcriptInput.value = preservedTranscript;
+    }
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = `<i class="ph-bold ph-plus-circle text-lg"></i><span>Document Spoken Items</span>`;
