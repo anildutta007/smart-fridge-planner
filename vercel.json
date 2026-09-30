@@ -1,13 +1,26 @@
 {
   "version": 2,
+  "cleanUrls": true,
   "builds": [
     {
       "src": "api/index.py",
       "use": "@vercel/python",
       "config": {
         "maxDuration": 60,
-        "includeFiles": "server.py"
+        "includeFiles": "server.py,api/server.py"
       }
+    },
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "styles.css",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "app.js",
+      "use": "@vercel/static"
     },
     {
       "src": "public/**/*",
@@ -20,24 +33,20 @@
       "dest": "/api/index.py"
     },
     {
-      "src": "/static/(.*)",
-      "dest": "/public/$1"
-    },
-    {
       "src": "/styles.css",
-      "dest": "/public/styles.css"
+      "dest": "/styles.css"
     },
     {
       "src": "/app.js",
-      "dest": "/public/app.js"
+      "dest": "/app.js"
     },
     {
       "src": "/",
-      "dest": "/public/index.html"
+      "dest": "/index.html"
     },
     {
       "src": "/(.*)",
-      "dest": "/public/$1"
+      "dest": "/$1"
     }
   ]
 }

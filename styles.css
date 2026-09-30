@@ -1,0 +1,109 @@
+/* Custom Styles for Smart Fridge & Household Meal Planner */
+
+:root {
+  --primary: #10b981;
+  --primary-dark: #059669;
+  --secondary: #6366f1;
+  --accent: #f59e0b;
+  --urgent: #ef4444;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+/* Glassmorphism & card polish */
+.card-shadow {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+}
+
+.card-shadow-hover:hover {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.04);
+  transform: translateY(-2px);
+  transition: all 0.2s ease-in-out;
+}
+
+/* Badges */
+.badge-urgent {
+  background-color: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.badge-medium {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.badge-low {
+  background-color: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.badge-leftover {
+  background-color: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.badge-fresh {
+  background-color: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+/* Camera modal & stream */
+.video-preview {
+  width: 100%;
+  max-height: 380px;
+  object-fit: cover;
+  border-radius: 0.75rem;
+  background-color: #000;
+}
+
+/* Smooth Tab transitions */
+.tab-content {
+  display: none;
+  animation: fadeIn 0.25s ease-in-out forwards;
+}
+
+.tab-content.active {
+  display: block;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Print Styling for clean weekly plan printing */
+@media print {
+  header, nav, .no-print, button, .settings-modal {
+    display: none !important;
+  }
+  body {
+    background-color: #fff !important;
+    color: #000 !important;
+    font-size: 11pt;
+  }
+  .tab-content {
+    display: block !important;
+  }
+  .print-page-break {
+    page-break-before: always;
+  }
+  .card-shadow {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+}
