@@ -710,6 +710,115 @@ def get_sample_data():
         "inventory": mock_analyze_fridge_image()
     }
 
+# ----------------- Family Profiles Storage & Endpoints -----------------
+FAMILIES_FILE = BASE_DIR / "data" / "families.json"
+_in_memory_families: Dict[str, Any] = {}
+
+def get_stored_families() -> Dict[str, Any]:
+    global _in_memory_families
+    if not _in_memory_families:
+        try:
+            if FAMILIES_FILE.exists():
+                with open(FAMILIES_FILE, "r", encoding="utf-8") as f:
+                    _in_memory_families = json.load(f)
+        except Exception as e:
+            print("Failed reading families file:", e)
+    return _in_memory_families
+
+def save_stored_families(families: Dict[str, Any]):
+    global _in_memory_families
+    _in_memory_families = families
+    try:
+        FAMILIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(FAMILIES_FILE, "w", encoding="utf-8") as f:
+            json.dump(families, f, indent=2)
+    except Exception as e:
+        print("Note: Disk write skipped or failed (common in serverless):", e)
+
+class SaveFamilyRequest(BaseModel):
+    family_id: str
+    family_name: str
+    pin: Optional[str] = ""
+    pin_required: bool = False
+    household: List[Dict[str, Any]] = Field(default_factory=list)
+    inventory: List[Dict[str, Any]] = Field(default_factory=list)
+    current_plan: Optional[Dict[str, Any]] = None
+    plan_start_date: Optional[str] = ""
+
+class LoadFamilyRequest(BaseModel):
+    family_id: Optional[str] = ""
+    family_name: Optional[str] = ""
+    pin: Optional[str] = ""
+
+@api_router.get("/family/list")
+def list_families():
+    """Lists available family profile names and PIN protection status."""
+    families = get_stored_families()
+    out = []
+    for fid, f in families.items():
+        out.append({
+            "family_id": fid,
+            "family_name": f.get("family_name", "Family"),
+            "pin_required": bool(f.get("pin_required")),
+            "has_pin": bool(f.get("pin")),
+            "member_count": len(f.get("household", [])),
+            "updated_at": f.get("updated_at")
+        })
+    return {"status": "success", "families": out}
+
+@api_router.post("/family/save")
+def save_family_profile(req: SaveFamilyRequest):
+    """Saves or updates a family profile with optional PIN protection."""
+    families = get_stored_families()
+    import datetime
+    now_iso = datetime.datetime.now().isoformat()
+    
+    families[req.family_id] = {
+        "family_id": req.family_id,
+        "family_name": req.family_name.strip() or "My Family",
+        "pin": req.pin or "",
+        "pin_required": req.pin_required and bool(req.pin),
+        "household": req.household,
+        "inventory": req.inventory,
+        "current_plan": req.current_plan,
+        "plan_start_date": req.plan_start_date,
+        "updated_at": now_iso
+    }
+    save_stored_families(families)
+    return {
+        "status": "success",
+        "message": f"Profile for '{req.family_name}' saved successfully!",
+        "family_id": req.family_id,
+        "family_name": req.family_name,
+        "pin_required": req.pin_required and bool(req.pin)
+    }
+
+@api_router.post("/family/load")
+def load_family_profile(req: LoadFamilyRequest):
+    """Loads a family profile, verifying PIN if protection is active."""
+    families = get_stored_families()
+    
+    target = None
+    if req.family_id and req.family_id in families:
+        target = families[req.family_id]
+    elif req.family_name:
+        for f in families.values():
+            if f.get("family_name", "").strip().lower() == req.family_name.strip().lower():
+                target = f
+                break
+                
+    if not target:
+        raise HTTPException(status_code=404, detail="Family profile not found.")
+        
+    if target.get("pin_required") and target.get("pin"):
+        if not req.pin or str(req.pin).strip() != str(target.get("pin")).strip():
+            raise HTTPException(status_code=401, detail="Incorrect PIN for this family profile.")
+            
+    return {
+        "status": "success",
+        "family": target
+    }
+
 @api_router.post("/analyze-fridge")
 async def analyze_fridge(
     image: Optional[UploadFile] = File(None),

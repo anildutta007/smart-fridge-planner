@@ -130,6 +130,50 @@ def test_indian_egg_free_elderly_member():
     assert mother_portions_found > 0, "Mother must have portions scheduled"
     print(f"[OK] Elderly Indian egg-free member test passed: {mother_portions_found} portions verified with authentic eggless Indian meals!")
 
+def test_family_profile_and_pin():
+    # 1. Save a family with PIN
+    save_payload = {
+        "family_id": "family-dutta-test",
+        "family_name": "Dutta Family",
+        "pin": "2468",
+        "pin_required": True,
+        "household": [
+            {"id": "m1", "name": "Anil", "age": 42, "sex": "Male"},
+            {"id": "m2", "name": "Mother", "age": 72, "sex": "Female"}
+        ],
+        "inventory": [
+            {"id": "i1", "name": "Leftover Rice", "category": "cooked_leftover"}
+        ]
+    }
+    res = client.post("/api/family/save", json=save_payload)
+    assert res.status_code == 200
+    save_data = res.json()
+    assert save_data["status"] == "success"
+    assert save_data["pin_required"] == True
+
+    # 2. List families
+    list_res = client.get("/api/family/list")
+    assert list_res.status_code == 200
+    families = list_res.json()["families"]
+    found = next((f for f in families if f["family_id"] == "family-dutta-test"), None)
+    assert found is not None
+    assert found["family_name"] == "Dutta Family"
+    assert found["pin_required"] == True
+    assert found["member_count"] == 2
+
+    # 3. Attempt load with incorrect PIN -> Should fail 401
+    bad_load_res = client.post("/api/family/load", json={"family_id": "family-dutta-test", "pin": "0000"})
+    assert bad_load_res.status_code == 401
+
+    # 4. Load with correct PIN -> Should succeed 200
+    good_load_res = client.post("/api/family/load", json={"family_id": "family-dutta-test", "pin": "2468"})
+    assert good_load_res.status_code == 200
+    loaded = good_load_res.json()["family"]
+    assert loaded["family_name"] == "Dutta Family"
+    assert len(loaded["household"]) == 2
+    assert len(loaded["inventory"]) == 1
+    print("[OK] Family Profile & PIN protection verified: Save, List, Unauthorized Lock, and PIN Unlock all succeeded!")
+
 if __name__ == "__main__":
     try:
         test_health()
@@ -138,6 +182,7 @@ if __name__ == "__main__":
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()
         test_indian_egg_free_elderly_member()
+        test_family_profile_and_pin()
         print("\nALL TESTS PASSED SUCCESSFULLY!")
     except Exception as e:
         print(f"\n[FAIL] Test failed: {e}", file=sys.stderr)

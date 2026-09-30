@@ -21,6 +21,8 @@ const DIETARY_OPTIONS = [
 
 // Application State
 let appState = {
+  activeFamilyId: "family-default",
+  families: {},
   household: [],
   inventory: [],
   selectedDietaryTags: new Set(),
@@ -29,6 +31,7 @@ let appState = {
   currentImageBase64: null,
   currentImageFile: null,
   currentPlan: null,
+  planStartDate: "",
   webcamStream: null,
   apiKey: localStorage.getItem("smartfridge_gemini_key") || ""
 };
@@ -40,35 +43,484 @@ document.addEventListener("DOMContentLoaded", () => {
   initApiKeyField();
   initPlanDate();
   
-  // Try loading from localStorage, otherwise load sample data
-  const savedHousehold = localStorage.getItem("smartfridge_household");
-  const savedInventory = localStorage.getItem("smartfridge_inventory");
-  
-  if (savedHousehold) {
-    try {
-      appState.household = JSON.parse(savedHousehold);
-    } catch (e) {
-      console.warn("Failed to parse saved household", e);
-    }
+  // Initialize Family Profile & PIN system (restores saved household, inventory & plan)
+  initFamilySystem();
+
+  // Pin Unlock Enter key listener
+  const pinInput = document.getElementById("pinUnlockInput");
+  if (pinInput) {
+    pinInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        submitPinUnlock();
+      }
+    });
   }
-  
-  if (savedInventory) {
+});
+
+// ==========================================
+// FAMILY PROFILE & PIN MANAGEMENT SYSTEM
+// ==========================================
+
+function initFamilySystem() {
+  const storedFamiliesRaw = localStorage.getItem("smartfridge_families");
+  let storedFamilies = null;
+  if (storedFamiliesRaw) {
     try {
-      appState.inventory = JSON.parse(savedInventory);
+      storedFamilies = JSON.parse(storedFamiliesRaw);
     } catch (e) {
-      console.warn("Failed to parse saved inventory", e);
+      console.warn("Failed to parse smartfridge_families", e);
     }
   }
 
-  // If empty, auto-populate samples so user sees a working app right away
+  // If no families stored, check legacy data or create default "Dutta Family"
+  if (!storedFamilies || Object.keys(storedFamilies).length === 0) {
+    const legacyHousehold = JSON.parse(localStorage.getItem("smartfridge_household") || "[]");
+    const legacyInventory = JSON.parse(localStorage.getItem("smartfridge_inventory") || "[]");
+    const legacyPlan = JSON.parse(localStorage.getItem("smartfridge_plan") || "null");
+
+    storedFamilies = {
+      "family-default": {
+        id: "family-default",
+        name: "Dutta Family",
+        pin: "",
+        pin_required: false,
+        household: legacyHousehold,
+        inventory: legacyInventory,
+        currentPlan: legacyPlan,
+        planStartDate: new Date().toISOString().split("T")[0],
+        updatedAt: new Date().toISOString()
+      }
+    };
+    localStorage.setItem("smartfridge_families", JSON.stringify(storedFamilies));
+    localStorage.setItem("smartfridge_active_family_id", "family-default");
+  }
+
+  appState.families = storedFamilies;
+  const activeId = localStorage.getItem("smartfridge_active_family_id") || Object.keys(storedFamilies)[0];
+  appState.activeFamilyId = activeId;
+
+  const activeFamily = appState.families[activeId] || Object.values(storedFamilies)[0];
+  appState.activeFamilyId = activeFamily.id;
+
+  updateHeaderFamilyBadge();
+
+  // Check PIN Lock on startup
+  if (activeFamily.pin_required && activeFamily.pin) {
+    const isUnlocked = sessionStorage.getItem("smartfridge_unlocked_" + activeFamily.id) === "true";
+    if (!isUnlocked) {
+      showPinUnlockModal(activeFamily);
+      return false;
+    }
+  }
+
+  // Load active family data into appState
+  loadFamilyDataIntoState(activeFamily);
+  return true;
+}
+
+function loadFamilyDataIntoState(family) {
+  appState.household = family.household || [];
+  appState.inventory = family.inventory || [];
+  appState.currentPlan = family.currentPlan || null;
+  
+  if (family.planStartDate) {
+    const dateInput = document.getElementById("planStartDateInput");
+    if (dateInput) {
+      dateInput.value = family.planStartDate;
+      updateStartWeekdayLabel();
+    }
+  }
+
   if (appState.household.length === 0 && appState.inventory.length === 0) {
     loadSampleAll();
   } else {
     renderHousehold();
     renderInventory();
     updateHeaderCounters();
+    if (appState.currentPlan) {
+      renderPlan(appState.currentPlan);
+    }
   }
-});
+
+  updateHeaderFamilyBadge();
+}
+
+function updateHeaderFamilyBadge() {
+  const activeFamily = appState.families[appState.activeFamilyId];
+  if (!activeFamily) return;
+
+  const headerName = document.getElementById("headerFamilyName");
+  const pinBadge = document.getElementById("headerPinBadge");
+
+  if (headerName) headerName.textContent = activeFamily.name || "Family Profile";
+  if (pinBadge) {
+    if (activeFamily.pin_required && activeFamily.pin) {
+      pinBadge.classList.remove("hidden");
+    } else {
+      pinBadge.classList.add("hidden");
+    }
+  }
+}
+
+function saveActiveFamilyToStorage(silent = true) {
+  const activeFamily = appState.families[appState.activeFamilyId];
+  if (!activeFamily) return;
+
+  activeFamily.household = appState.household;
+  activeFamily.inventory = appState.inventory;
+  activeFamily.currentPlan = appState.currentPlan;
+  
+  const dateInput = document.getElementById("planStartDateInput");
+  if (dateInput && dateInput.value) {
+    activeFamily.planStartDate = dateInput.value;
+  }
+  activeFamily.updatedAt = new Date().toISOString();
+
+  localStorage.setItem("smartfridge_families", JSON.stringify(appState.families));
+  localStorage.setItem("smartfridge_active_family_id", activeFamily.id);
+
+  // Sync to legacy keys as well
+  localStorage.setItem("smartfridge_household", JSON.stringify(appState.household));
+  localStorage.setItem("smartfridge_inventory", JSON.stringify(appState.inventory));
+  if (appState.currentPlan) {
+    localStorage.setItem("smartfridge_plan", JSON.stringify(appState.currentPlan));
+  }
+
+  updateHeaderFamilyBadge();
+
+  // Async sync to backend
+  fetch("/api/family/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      family_id: activeFamily.id,
+      family_name: activeFamily.name,
+      pin: activeFamily.pin || "",
+      pin_required: Boolean(activeFamily.pin_required && activeFamily.pin),
+      household: activeFamily.household,
+      inventory: activeFamily.inventory,
+      current_plan: activeFamily.currentPlan,
+      plan_start_date: activeFamily.planStartDate || ""
+    })
+  }).catch(() => {});
+}
+
+function showPinUnlockModal(family) {
+  const modal = document.getElementById("pinUnlockModal");
+  const nameEl = document.getElementById("pinUnlockFamilyName");
+  const inputEl = document.getElementById("pinUnlockInput");
+  const errorEl = document.getElementById("pinUnlockErrorMsg");
+
+  if (nameEl) nameEl.textContent = family.name || "Family Profile";
+  if (inputEl) {
+    inputEl.value = "";
+    setTimeout(() => inputEl.focus(), 150);
+  }
+  if (errorEl) {
+    errorEl.textContent = "";
+    errorEl.classList.add("hidden");
+  }
+
+  modal.classList.remove("hidden");
+}
+
+function submitPinUnlock() {
+  const activeFamily = appState.families[appState.activeFamilyId];
+  if (!activeFamily) return;
+
+  const inputEl = document.getElementById("pinUnlockInput");
+  const errorEl = document.getElementById("pinUnlockErrorMsg");
+  const enteredPin = (inputEl.value || "").trim();
+
+  if (!enteredPin) {
+    errorEl.textContent = "Please enter your 4-digit PIN.";
+    errorEl.classList.remove("hidden");
+    return;
+  }
+
+  if (enteredPin === activeFamily.pin) {
+    sessionStorage.setItem("smartfridge_unlocked_" + activeFamily.id, "true");
+    document.getElementById("pinUnlockModal").classList.add("hidden");
+    loadFamilyDataIntoState(activeFamily);
+    showToast(`Welcome back to ${activeFamily.name}! Profile unlocked.`, "success");
+  } else {
+    errorEl.textContent = "Incorrect PIN. Please try again.";
+    errorEl.classList.remove("hidden");
+    inputEl.value = "";
+    inputEl.focus();
+  }
+}
+
+function lockActiveFamilyNow() {
+  const activeFamily = appState.families[appState.activeFamilyId];
+  if (!activeFamily) return;
+
+  if (!activeFamily.pin_required || !activeFamily.pin) {
+    showToast("Please enable PIN and set a 4-digit PIN before locking.", "warning");
+    document.getElementById("chkFamilyPinRequired").checked = true;
+    togglePinInputVisibility();
+    document.getElementById("familyPinInput").focus();
+    return;
+  }
+
+  sessionStorage.removeItem("smartfridge_unlocked_" + activeFamily.id);
+  closeFamilyModal();
+  showPinUnlockModal(activeFamily);
+  showToast(`${activeFamily.name} locked. PIN required to access.`, "info");
+}
+
+function openFamilyModal() {
+  const activeFamily = appState.families[appState.activeFamilyId] || {
+    id: "family-default",
+    name: "Dutta Family",
+    pin: "",
+    pin_required: false
+  };
+
+  document.getElementById("familyProfileNameInput").value = activeFamily.name || "Dutta Family";
+  
+  const chkPin = document.getElementById("chkFamilyPinRequired");
+  chkPin.checked = Boolean(activeFamily.pin_required && activeFamily.pin);
+  
+  document.getElementById("familyPinInput").value = activeFamily.pin || "";
+  document.getElementById("familyPinConfirmInput").value = activeFamily.pin || "";
+  
+  togglePinInputVisibility();
+  switchFamilySubTab("profile");
+  renderSavedFamiliesList();
+  
+  document.getElementById("familyModal").classList.remove("hidden");
+}
+
+function closeFamilyModal() {
+  document.getElementById("familyModal").classList.add("hidden");
+}
+
+function switchFamilySubTab(tab) {
+  const subTabs = ["profile", "switch", "backup"];
+  subTabs.forEach(t => {
+    const btn = document.getElementById(`familySubTab${t.charAt(0).toUpperCase() + t.slice(1)}`);
+    const panel = document.getElementById(`familyPanel${t.charAt(0).toUpperCase() + t.slice(1)}`);
+    if (btn && panel) {
+      if (t === tab) {
+        btn.className = "pb-2 px-3 border-b-2 border-emerald-500 text-emerald-700 font-bold";
+        panel.classList.remove("hidden");
+      } else {
+        btn.className = "pb-2 px-3 border-b-2 border-transparent text-slate-500 hover:text-slate-700";
+        panel.classList.add("hidden");
+      }
+    }
+  });
+
+  if (tab === "switch") {
+    renderSavedFamiliesList();
+  }
+}
+
+function togglePinInputVisibility() {
+  const chk = document.getElementById("chkFamilyPinRequired");
+  const fields = document.getElementById("pinEntryFields");
+  if (chk && fields) {
+    if (chk.checked) {
+      fields.classList.remove("hidden");
+    } else {
+      fields.classList.add("hidden");
+    }
+  }
+}
+
+function saveFamilyProfileSettings() {
+  const activeFamily = appState.families[appState.activeFamilyId];
+  if (!activeFamily) return;
+
+  const name = document.getElementById("familyProfileNameInput").value.trim();
+  if (!name) {
+    showToast("Please enter a family name.", "warning");
+    return;
+  }
+
+  const isPinReq = document.getElementById("chkFamilyPinRequired").checked;
+  const pin = document.getElementById("familyPinInput").value.trim();
+  const pinConfirm = document.getElementById("familyPinConfirmInput").value.trim();
+
+  if (isPinReq) {
+    if (!pin || pin.length < 4) {
+      showToast("Please enter a 4-digit PIN.", "warning");
+      return;
+    }
+    if (pin !== pinConfirm) {
+      showToast("PIN and Confirm PIN do not match!", "error");
+      return;
+    }
+  }
+
+  activeFamily.name = name;
+  activeFamily.pin_required = isPinReq;
+  activeFamily.pin = isPinReq ? pin : "";
+
+  sessionStorage.setItem("smartfridge_unlocked_" + activeFamily.id, "true");
+
+  saveActiveFamilyToStorage();
+  closeFamilyModal();
+  showToast(isPinReq ? `Profile "${name}" saved with PIN security!` : `Profile "${name}" updated!`, "success");
+}
+
+function renderSavedFamiliesList() {
+  const container = document.getElementById("savedFamiliesList");
+  if (!container) return;
+  container.innerHTML = "";
+
+  Object.values(appState.families).forEach(fam => {
+    const isCurrent = fam.id === appState.activeFamilyId;
+    const card = document.createElement("div");
+    card.className = `p-3 rounded-xl border flex items-center justify-between gap-2 transition ${isCurrent ? 'bg-emerald-50/60 border-emerald-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`;
+    
+    card.innerHTML = `
+      <div class="flex items-center space-x-2.5">
+        <div class="w-8 h-8 rounded-lg ${isCurrent ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600'} flex items-center justify-center font-bold text-sm">
+          <i class="ph-bold ph-house"></i>
+        </div>
+        <div>
+          <div class="flex items-center space-x-1.5">
+            <span class="font-bold text-slate-800 text-xs">${escapeHtml(fam.name || 'Family')}</span>
+            ${isCurrent ? '<span class="text-[10px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded font-semibold">Active</span>' : ''}
+          </div>
+          <p class="text-[11px] text-slate-400">
+            ${(fam.household || []).length} members &bull; ${(fam.inventory || []).length} items
+            ${fam.pin_required && fam.pin ? '&bull; <span class="text-emerald-700 font-semibold"><i class="ph-bold ph-lock-key"></i> PIN Protected</span>' : ''}
+          </p>
+        </div>
+      </div>
+      <div>
+        ${isCurrent ? `
+          <button disabled class="text-xs px-2.5 py-1 rounded bg-emerald-100 text-emerald-800 font-semibold cursor-default">Current</button>
+        ` : `
+          <button onclick="switchActiveFamily('${fam.id}')" class="text-xs px-2.5 py-1 rounded bg-slate-900 hover:bg-black text-white font-semibold transition">Switch</button>
+        `}
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function switchActiveFamily(targetFamilyId) {
+  const targetFam = appState.families[targetFamilyId];
+  if (!targetFam) return;
+
+  saveActiveFamilyToStorage();
+
+  appState.activeFamilyId = targetFamilyId;
+  localStorage.setItem("smartfridge_active_family_id", targetFamilyId);
+
+  closeFamilyModal();
+
+  if (targetFam.pin_required && targetFam.pin) {
+    const isUnlocked = sessionStorage.getItem("smartfridge_unlocked_" + targetFam.id) === "true";
+    if (!isUnlocked) {
+      showPinUnlockModal(targetFam);
+      return;
+    }
+  }
+
+  loadFamilyDataIntoState(targetFam);
+  showToast(`Switched to "${targetFam.name}"!`, "success");
+}
+
+function createNewFamilyProfileTrigger() {
+  const input = document.getElementById("newFamilyNameInput");
+  const name = (input.value || "").trim();
+  if (!name) {
+    showToast("Please enter a name for the new family profile.", "warning");
+    return;
+  }
+
+  const newId = `family-${Date.now()}`;
+  const newFam = {
+    id: newId,
+    name: name,
+    pin: "",
+    pin_required: false,
+    household: [],
+    inventory: [],
+    currentPlan: null,
+    planStartDate: new Date().toISOString().split("T")[0],
+    updatedAt: new Date().toISOString()
+  };
+
+  appState.families[newId] = newFam;
+  input.value = "";
+
+  switchActiveFamily(newId);
+  showToast(`Created new profile "${name}"! Add your members to get started.`, "success");
+}
+
+function switchFamilyFromUnlockModal() {
+  document.getElementById("pinUnlockModal").classList.add("hidden");
+  openFamilyModal();
+  switchFamilySubTab("switch");
+}
+
+function resetPinPrompt() {
+  const activeFamily = appState.families[appState.activeFamilyId];
+  if (!activeFamily) return;
+
+  if (confirm(`Do you want to reset the PIN for "${activeFamily.name}" on this device? (All household members and meal plans will be preserved).`)) {
+    activeFamily.pin_required = false;
+    activeFamily.pin = "";
+    sessionStorage.setItem("smartfridge_unlocked_" + activeFamily.id, "true");
+    saveActiveFamilyToStorage();
+    document.getElementById("pinUnlockModal").classList.add("hidden");
+    loadFamilyDataIntoState(activeFamily);
+    showToast(`PIN removed for "${activeFamily.name}". You can set a new one in Family Settings anytime.`, "info");
+  }
+}
+
+function exportFamilyBackupJSON() {
+  const activeFamily = appState.families[appState.activeFamilyId];
+  if (!activeFamily) return;
+
+  saveActiveFamilyToStorage();
+
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(activeFamily, null, 2));
+  const downloadAnchor = document.createElement("a");
+  const filename = `${(activeFamily.name || 'family').toLowerCase().replace(/[^a-z0-9]/g, '_')}_backup_${new Date().toISOString().split('T')[0]}.json`;
+  downloadAnchor.setAttribute("href", dataStr);
+  downloadAnchor.setAttribute("download", filename);
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
+
+  showToast(`Backup exported as ${filename}`, "success");
+}
+
+function importFamilyBackupJSON(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const imported = JSON.parse(e.target.result);
+      if (!imported.household && !imported.inventory) {
+        showToast("Invalid backup file format.", "error");
+        return;
+      }
+
+      const famId = imported.id || `family-${Date.now()}`;
+      appState.families[famId] = imported;
+      appState.activeFamilyId = famId;
+      sessionStorage.setItem("smartfridge_unlocked_" + famId, "true");
+
+      saveActiveFamilyToStorage();
+      loadFamilyDataIntoState(imported);
+      closeFamilyModal();
+      showToast(`Successfully imported "${imported.name || 'Family'}"!`, "success");
+    } catch (err) {
+      showToast("Failed to read JSON backup file.", "error");
+    }
+  };
+  reader.readAsText(file);
+}
 
 // ----------------- Tab Navigation -----------------
 function switchTab(tabId) {
@@ -461,7 +913,7 @@ function deleteMember(id) {
 }
 
 function saveHouseholdToStorage() {
-  localStorage.setItem("smartfridge_household", JSON.stringify(appState.household));
+  saveActiveFamilyToStorage();
 }
 
 
@@ -573,7 +1025,7 @@ function deleteInventoryItem(id) {
 }
 
 function saveInventoryToStorage() {
-  localStorage.setItem("smartfridge_inventory", JSON.stringify(appState.inventory));
+  saveActiveFamilyToStorage();
 }
 
 // ----------------- Add Item Modal -----------------
@@ -1119,6 +1571,7 @@ async function generatePlanTrigger() {
         const directPlan = await callGeminiPlanDirect(appState.apiKey, requestPayload);
         if (directPlan && (directPlan.plan_days || directPlan.days || directPlan.plan)) {
           appState.currentPlan = directPlan;
+          saveActiveFamilyToStorage();
           renderPlan(directPlan);
           showToast("7-Day Meal Plan generated with Gemini 2.0 Flash!", "success");
           return;
@@ -1159,6 +1612,7 @@ async function generatePlanTrigger() {
 
     if (planData && (planData.plan_days || planData.days || planData.plan)) {
       appState.currentPlan = planData;
+      saveActiveFamilyToStorage();
       renderPlan(planData);
       showToast("7-Day Meal Plan generated successfully!", "success");
       return;
@@ -1167,12 +1621,14 @@ async function generatePlanTrigger() {
     // 3. Built-in Client Heuristic Engine (Ensures plan generation 100% succeeds)
     const fallbackPlan = generateClientFallbackPlan(requestPayload);
     appState.currentPlan = fallbackPlan;
+    saveActiveFamilyToStorage();
     renderPlan(fallbackPlan);
     showToast("7-Day Meal Plan generated! (Using smart offline mode)", "info");
   } catch (err) {
     console.error("Plan generation error:", err);
     const fallbackPlan = generateClientFallbackPlan(requestPayload);
     appState.currentPlan = fallbackPlan;
+    saveActiveFamilyToStorage();
     renderPlan(fallbackPlan);
     showToast("7-Day Meal Plan generated! (Offline fallback mode)", "info");
   } finally {

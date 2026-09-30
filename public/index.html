@@ -48,6 +48,16 @@
           </span>
         </div>
 
+        <!-- Family Profile & PIN Status Button -->
+        <button id="btnFamilyProfile" onclick="openFamilyModal()" class="text-xs font-semibold flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-sm" title="Family Profile & PIN Settings">
+          <i class="ph-bold ph-house-line text-sm text-emerald-600"></i>
+          <span id="headerFamilyName">Family Profile</span>
+          <span id="headerPinBadge" class="hidden text-[10px] px-1.5 py-0.5 bg-emerald-200 text-emerald-900 rounded-full font-bold flex items-center space-x-0.5">
+            <i class="ph-bold ph-lock-key"></i>
+            <span>PIN</span>
+          </span>
+        </button>
+
         <button id="btnOpenSettings" class="text-xs font-semibold flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition">
           <i class="ph-bold ph-gear"></i>
           <span>Gemini Key</span>
@@ -591,6 +601,152 @@
           <button onclick="closeSettingsModal()" class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-medium">Cancel</button>
           <button onclick="saveApiKey()" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm">Save Key</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: FAMILY PROFILE & PIN SETTINGS       -->
+  <!-- ========================================== -->
+  <div id="familyModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-100 space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2">
+          <i class="ph-bold ph-house-line text-emerald-600"></i>
+          <span>Family Profile & PIN</span>
+        </h3>
+        <button onclick="closeFamilyModal()" class="text-slate-400 hover:text-slate-600">
+          <i class="ph ph-x text-lg"></i>
+        </button>
+      </div>
+
+      <!-- Tabs inside Family Modal: Profile & PIN / Switch Family / Backup -->
+      <div class="flex border-b border-slate-200 text-xs font-semibold">
+        <button id="familySubTabProfile" onclick="switchFamilySubTab('profile')" class="pb-2 px-3 border-b-2 border-emerald-500 text-emerald-700">Settings & PIN</button>
+        <button id="familySubTabSwitch" onclick="switchFamilySubTab('switch')" class="pb-2 px-3 border-b-2 border-transparent text-slate-500 hover:text-slate-700">Switch Family</button>
+        <button id="familySubTabBackup" onclick="switchFamilySubTab('backup')" class="pb-2 px-3 border-b-2 border-transparent text-slate-500 hover:text-slate-700">Backup & Export</button>
+      </div>
+
+      <!-- Panel 1: Profile & PIN -->
+      <div id="familyPanelProfile" class="space-y-4 text-xs sm:text-sm">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Family Profile Name</label>
+          <input type="text" id="familyProfileNameInput" placeholder="e.g. Dutta Family" class="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          <p class="text-[11px] text-slate-400 mt-1">All members, fridge inventory, and meal plans are saved under this family name.</p>
+        </div>
+
+        <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="font-bold text-slate-800">4-Digit Security PIN</span>
+              <p class="text-[11px] text-slate-500">Require PIN to open and view this family profile when logging in</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="chkFamilyPinRequired" onchange="togglePinInputVisibility()" class="sr-only peer">
+              <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+
+          <div id="pinEntryFields" class="space-y-2 hidden pt-2 border-t border-slate-200">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Set 4-Digit PIN</label>
+                <input type="password" id="familyPinInput" maxlength="6" placeholder="e.g. 1234" class="w-full p-2 border border-slate-300 rounded-lg text-center font-mono tracking-widest text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-slate-600 mb-0.5">Confirm PIN</label>
+                <input type="password" id="familyPinConfirmInput" maxlength="6" placeholder="e.g. 1234" class="w-full p-2 border border-slate-300 rounded-lg text-center font-mono tracking-widest text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+              </div>
+            </div>
+            <p class="text-[11px] text-amber-700 flex items-center space-x-1">
+              <i class="ph-bold ph-lock-key"></i>
+              <span>Keep your PIN safe. It will be required whenever you open this family profile.</span>
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2">
+          <button type="button" onclick="lockActiveFamilyNow()" id="btnLockActiveFamily" class="text-xs text-amber-700 hover:text-amber-800 font-semibold flex items-center space-x-1 px-2.5 py-1.5 rounded-lg border border-amber-200 bg-amber-50">
+            <i class="ph-bold ph-lock"></i>
+            <span>Lock Profile Now</span>
+          </button>
+          <button type="button" onclick="saveFamilyProfileSettings()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm">
+            Save Profile
+          </button>
+        </div>
+      </div>
+
+      <!-- Panel 2: Switch / Create Family -->
+      <div id="familyPanelSwitch" class="hidden space-y-3 text-xs sm:text-sm">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Saved Family Profiles on this Device</label>
+          <div id="savedFamiliesList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-100 space-y-2">
+          <label class="block font-semibold text-slate-700">Create New Family Profile</label>
+          <div class="flex items-center space-x-2">
+            <input type="text" id="newFamilyNameInput" placeholder="New family name (e.g. Dutta Family 2)" class="flex-1 p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none text-xs">
+            <button onclick="createNewFamilyProfileTrigger()" class="px-3 py-2 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-semibold whitespace-nowrap">
+              + Create
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Panel 3: Backup & Export -->
+      <div id="familyPanelBackup" class="hidden space-y-3 text-xs sm:text-sm">
+        <p class="text-xs text-slate-500 leading-relaxed">
+          Download a backup file of your family members, fridge inventory, and weekly meal plan, or import an existing backup.
+        </p>
+        <div class="grid grid-cols-2 gap-3 pt-2">
+          <button onclick="exportFamilyBackupJSON()" class="p-3 rounded-xl border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center space-y-1 text-center transition">
+            <i class="ph-bold ph-download-simple text-2xl text-emerald-600"></i>
+            <span class="font-bold text-xs text-slate-800">Export Backup</span>
+            <span class="text-[10px] text-slate-400">Save as JSON file</span>
+          </button>
+          <label class="p-3 rounded-xl border border-slate-200 hover:bg-slate-50 flex flex-col items-center justify-center space-y-1 text-center cursor-pointer transition">
+            <i class="ph-bold ph-upload-simple text-2xl text-indigo-600"></i>
+            <span class="font-bold text-xs text-slate-800">Import Backup</span>
+            <span class="text-[10px] text-slate-400">Load JSON file</span>
+            <input type="file" accept=".json" onchange="importFamilyBackupJSON(event)" class="hidden">
+          </label>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- MODAL: PIN UNLOCK ON LOGON                 -->
+  <!-- ========================================== -->
+  <div id="pinUnlockModal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center space-y-5">
+      <div class="w-14 h-14 bg-emerald-100 text-emerald-700 rounded-2xl flex items-center justify-center text-3xl mx-auto shadow-inner">
+        <i class="ph-bold ph-lock-key"></i>
+      </div>
+
+      <div class="space-y-1">
+        <h3 class="text-lg font-bold text-slate-900" id="pinUnlockFamilyName">Dutta Family</h3>
+        <p class="text-xs text-slate-500">This profile is PIN protected. Enter your 4-digit PIN to access your meal plan & fridge.</p>
+      </div>
+
+      <div class="space-y-3">
+        <div class="flex justify-center">
+          <input type="password" id="pinUnlockInput" maxlength="6" autofocus placeholder="••••" class="w-40 text-center text-2xl tracking-[0.5em] font-mono p-3 border-2 border-emerald-500 rounded-xl focus:outline-none focus:ring-4 focus:ring-emerald-100 text-slate-900">
+        </div>
+        <p id="pinUnlockErrorMsg" class="hidden text-xs text-red-600 font-semibold"></p>
+
+        <button onclick="submitPinUnlock()" class="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md transition">
+          Unlock Profile
+        </button>
+      </div>
+
+      <div class="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+        <button onclick="switchFamilyFromUnlockModal()" class="hover:text-emerald-700 font-medium">Switch Family</button>
+        <button onclick="resetPinPrompt()" class="text-slate-400 hover:text-slate-600">Forgot PIN?</button>
       </div>
     </div>
   </div>
