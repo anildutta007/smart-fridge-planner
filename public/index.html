@@ -763,7 +763,12 @@
             <p class="text-xs text-amber-100 font-medium">Family Cook & Smart Fridge Butler</p>
           </div>
         </div>
-        <div class="flex items-center space-x-1">
+        <div class="flex items-center space-x-1.5">
+          <!-- Quick Voice Replay -->
+          <button onclick="playBiwijiGreetingDirect()" class="px-2.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs flex items-center space-x-1 transition cursor-pointer border border-white/25 shadow-xs" title="Hear 'Biwiji Boliye Kya Hukum'">
+            <i class="ph-bold ph-speaker-high"></i>
+            <span>Say Greeting</span>
+          </button>
           <!-- Voice Audio Mute/Unmute Toggle -->
           <button id="btnRamuMute" onclick="toggleRamuMute()" class="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer" title="Mute/Unmute Voice Audio">
             <i id="ramuMuteIcon" class="ph-bold ph-speaker-high text-lg"></i>
@@ -864,6 +869,6 @@
   </div>
 
   <!-- App Script with cache buster -->
-  <script src="app.js?v=2.2.4"></script>
+  <script src="app.js?v=2.2.5"></script>
 </body>
 </html>

@@ -2174,6 +2174,14 @@ function escapeHtml(str) {
 // ==========================================
 // 6. RAMU KAKA CONVERSATIONAL VOICE ASSISTANT
 // ==========================================
+let cachedVoices = [];
+if (typeof window !== "undefined" && 'speechSynthesis' in window) {
+  cachedVoices = window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => {
+    cachedVoices = window.speechSynthesis.getVoices();
+  };
+}
+
 const ramuState = {
   isOpen: false,
   isMuted: false,
@@ -2235,6 +2243,46 @@ function toggleRamuMute() {
   showToast(ramuState.isMuted ? "Ramu Kaka voice audio muted." : "Ramu Kaka voice audio enabled.", "info");
 }
 
+function addRamuAudioPlayBanner() {
+  const container = document.getElementById("ramuDialogueContainer");
+  if (!container) return;
+
+  const existing = document.getElementById("ramuAudioTapBanner");
+  if (existing) existing.remove();
+
+  const banner = document.createElement("div");
+  banner.id = "ramuAudioTapBanner";
+  banner.className = "p-3.5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 rounded-2xl text-white flex items-center justify-between shadow-md cursor-pointer active:scale-95 transition mb-2";
+  banner.onclick = () => {
+    banner.remove();
+    playBiwijiGreetingDirect();
+  };
+  banner.innerHTML = `
+    <div class="flex items-center space-x-2.5">
+      <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-lg shadow-inner">
+        🔊
+      </div>
+      <div>
+        <div class="font-extrabold text-xs sm:text-sm">"Biwiji, boliye kya hukum?"</div>
+        <div class="text-[10px] sm:text-[11px] text-amber-100 font-medium">Tap to hear Ramu Kaka speak aloud</div>
+      </div>
+    </div>
+    <span class="text-xs font-bold bg-white text-amber-900 px-2.5 py-1 rounded-xl shadow-xs flex-shrink-0">Play Voice</span>
+  `;
+  container.prepend(banner);
+}
+
+function playBiwijiGreetingDirect() {
+  const banner = document.getElementById("ramuAudioTapBanner");
+  if (banner) banner.remove();
+
+  speakRamuKaka("Biwiji, boliye kya hukum?", () => {
+    ramuState.conversationStep = "WAIT_INTENT";
+    setRamuStatus("🔴 Listening... Say 'What to cook' (or tap below)", "listening");
+    startRamuListening();
+  });
+}
+
 function restartRamuConversation() {
   ramuState.conversationStep = "GREETING";
   ramuState.userIntent = "";
@@ -2253,6 +2301,9 @@ function restartRamuConversation() {
   // Initial prompt: "Biwiji, boliye kya hukum?"
   const greeting = "Biwiji, boliye kya hukum?";
   addRamuChatMessage("ramu", greeting);
+
+  // Add one-tap audio banner so mobile Safari/Chrome can activate sound instantly
+  addRamuAudioPlayBanner();
 
   renderRamuQuickChips([
     { label: "What to cook?", value: "What to cook" },
@@ -2277,34 +2328,59 @@ function speakRamuKaka(text, onEnd) {
   }
 
   try {
-    window.speechSynthesis.cancel();
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+
     const utterance = new SpeechSynthesisUtterance(text);
 
-    // Pick best available voice (prefer en-IN or hi-IN or natural English)
-    const voices = window.speechSynthesis.getVoices();
-    const preferredVoice = voices.find(v => {
-      const name = (v.name || "").toLowerCase();
-      const lang = (v.lang || "").toLowerCase();
-      return lang.includes("in") || name.includes("india") || name.includes("rishi") || name.includes("lekha") || name.includes("veena") || name.includes("neerja");
-    }) || voices.find(v => v.lang.startsWith("en"));
+    // Set language: hi-IN for authentic Indian pronunciation, en-IN for English
+    const hasHindi = /biwiji|hukum|kya|boliye|samay|swadisht|karta|hoon|aapke|sabzi|garam|batao/i.test(text);
+    utterance.lang = hasHindi ? "hi-IN" : "en-IN";
 
-    if (preferredVoice) utterance.voice = preferredVoice;
-    utterance.rate = 0.98;
-    utterance.pitch = 0.95;
+    if (!cachedVoices || cachedVoices.length === 0) {
+      cachedVoices = window.speechSynthesis.getVoices();
+    }
+
+    if (cachedVoices && cachedVoices.length > 0) {
+      const preferredVoice = cachedVoices.find(v => {
+        const name = (v.name || "").toLowerCase();
+        const lang = (v.lang || "").toLowerCase();
+        return lang.includes("hi") || lang.includes("in") || name.includes("india") || name.includes("rishi") || name.includes("lekha") || name.includes("veena") || name.includes("neerja");
+      }) || cachedVoices.find(v => v.lang.startsWith("en"));
+
+      if (preferredVoice) utterance.voice = preferredVoice;
+    }
+
+    utterance.rate = 0.92;
+    utterance.pitch = 0.98;
+    utterance.volume = 1.0;
 
     ramuState.isSpeaking = true;
     updateRamuWaveUI();
 
-    utterance.onend = () => {
+    let finished = false;
+    const finishCallback = () => {
+      if (finished) return;
+      finished = true;
       ramuState.isSpeaking = false;
       updateRamuWaveUI();
       if (onEnd) onEnd();
     };
-    utterance.onerror = () => {
-      ramuState.isSpeaking = false;
-      updateRamuWaveUI();
-      if (onEnd) onEnd();
+
+    utterance.onend = finishCallback;
+    utterance.onerror = (e) => {
+      console.warn("SpeechSynthesis error:", e);
+      finishCallback();
     };
+
+    // Safety timeout in case iOS Safari keeps utterance in limbo
+    const safeMs = Math.max(3000, text.length * 90);
+    setTimeout(() => {
+      if (!finished && ramuState.isSpeaking) {
+        finishCallback();
+      }
+    }, safeMs);
 
     window.speechSynthesis.speak(utterance);
   } catch (err) {
