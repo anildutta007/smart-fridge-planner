@@ -139,6 +139,27 @@ function updateHeaderCounters() {
 // ==========================================
 function initCaptureCenter() {
   initDropZone();
+
+  // Check URL parameters (e.g. ?wake=ramukaka or ?mode=voice or ?from=shortcut)
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("mode")) {
+      const mode = params.get("mode").toLowerCase();
+      if (["voice", "video", "camera", "type"].includes(mode)) {
+        switchCaptureMode(mode);
+      }
+    }
+    if (params.get("wake") === "ramukaka" || params.has("ramukaka")) {
+      setTimeout(() => {
+        showToast("👋 Namaste! Ramu Kaka at your service. Ready to document your food.", "success");
+        const btnRecord = document.getElementById("btnVoiceRecord");
+        if (btnRecord) {
+          btnRecord.classList.add("ring-4", "ring-emerald-400", "ring-offset-2");
+          setTimeout(() => btnRecord.classList.remove("ring-4", "ring-emerald-400", "ring-offset-2"), 4500);
+        }
+      }, 500);
+    }
+  } catch (_) {}
 }
 
 function switchCaptureMode(mode) {
