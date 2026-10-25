@@ -132,6 +132,13 @@ class GeneratePlanRequest(BaseModel):
     start_date: Optional[str] = None
     notes_or_goals: Optional[str] = "Minimize food waste and strictly honor dietary restrictions"
 
+class RamuKakaRecommendRequest(BaseModel):
+    time_available_minutes: Optional[int] = 20
+    user_prompt: Optional[str] = "What to cook"
+    inventory: List[Dict[str, Any]] = Field(default_factory=list)
+    household: List[Dict[str, Any]] = Field(default_factory=list)
+    preferences: Optional[str] = ""
+
 # ----------------- Helper Functions -----------------
 
 def get_effective_api_key(client_key: Optional[str] = None) -> Optional[str]:
@@ -1306,6 +1313,235 @@ Output ONLY valid JSON matching:
         "items": fallback_items,
         "detection_summary": f"Video sweep processed ({len(frames)} frames). Enter your free Gemini API key in Settings to scan live video with Gemini 2.0 Flash."
     }
+
+# ----------------- Ramu Kaka Voice Assistant Engine -----------------
+
+def mock_ramu_kaka_recommend(req: RamuKakaRecommendRequest) -> Dict[str, Any]:
+    time_mins = req.time_available_minutes or 20
+    inv = req.inventory or []
+
+    leftovers = [i for i in inv if i.get("category") == "cooked_leftover"]
+    raw = [i for i in inv if i.get("category") == "raw_ingredient"]
+    names_lower = [str(i.get("name", "")).lower() for i in inv]
+
+    has_chicken = any("chicken" in n for n in names_lower)
+    has_cabbage = any("cabbage" in n for n in names_lower)
+    has_cauliflower = any("cauliflower" in n or "gobi" in n for n in names_lower)
+    has_courgette = any("courgette" in n or "zucchini" in n for n in names_lower)
+    has_daal = any("daal" in n or "dal" in n or "lentil" in n for n in names_lower)
+    has_curd = any("curd" in n or "yogurt" in n or "dahi" in n for n in names_lower)
+    has_eggs = any("egg" in n for n in names_lower)
+    has_rice = any("rice" in n or "chawal" in n for n in names_lower)
+
+    # 1. Very fast (<= 10 mins) with leftovers available
+    if time_mins <= 10 and leftovers:
+        top_leftover = leftovers[0]
+        name = top_leftover.get("name", "Leftover Dish")
+        qty = top_leftover.get("quantity", "1 portion")
+        return {
+            "status": "success",
+            "source": "ramu_kaka_culinary_engine",
+            "dish_name": f"Reheated {name} with Fresh Ghee Tempering",
+            "prep_cook_time_minutes": min(time_mins, 8),
+            "category": "Quick Leftover Reheat",
+            "spoken_response": f"Biwiji, aapke paas bas {time_mins} minute hain! Fridge mein ready {name} ({qty}) hai. Bas 5 minute mein tawa ya microwave mein garam karke enjoy kijiye!",
+            "ingredients_used": [f"{name} ({qty})"],
+            "pantry_items_needed": ["Ghee or Butter", "Pinch of cumin or fresh coriander"],
+            "why_recommended": f"Uses high-priority leftover {name} to save cooking time and prevent food waste.",
+            "quick_steps": [
+                f"Take the {name} from the fridge.",
+                "Warm thoroughly in a pan with 1 tsp ghee or microwave for 2-3 minutes.",
+                "Sprinkle with fresh coriander or lemon juice and serve warm with bread or papad."
+            ],
+            "leftover_alert": f"Zero food waste: Finished delicious {name} within {time_mins} minutes!"
+        }
+
+    # 2. Cabbage + Chicken
+    if has_cabbage and has_chicken:
+        cabbage_item = next((i for i in inv if "cabbage" in str(i.get("name", "")).lower()), None)
+        chicken_item = next((i for i in inv if "chicken" in str(i.get("name", "")).lower()), None)
+        c_qty = cabbage_item.get("quantity", "500 gms") if cabbage_item else "500 gms"
+        ch_qty = chicken_item.get("quantity", "3 portions") if chicken_item else "portions"
+        is_cooked = chicken_item and chicken_item.get("category") == "cooked_leftover"
+
+        cook_time = 15 if is_cooked else min(time_mins, 25)
+        dish_name = "Quick Homestyle Spiced Cabbage & Chicken Stir-Fry (Bandhakopi Murgh)"
+        spoken = f"Biwiji, aapke paas {time_mins} minute hain aur fridge mein {c_qty} Cabbage aur {ch_qty} Chicken hai! Main recommend karta hoon: Quick Cabbage & Chicken Stir-Fry! Yeh 15 minute mein swadisht ban jayega."
+        return {
+            "status": "success",
+            "source": "ramu_kaka_culinary_engine",
+            "dish_name": dish_name,
+            "prep_cook_time_minutes": cook_time,
+            "category": "High-Protein Main Dish",
+            "spoken_response": spoken,
+            "ingredients_used": [f"Cabbage ({c_qty})", f"Chicken ({ch_qty})"],
+            "pantry_items_needed": ["Cooking oil (1-2 tbsp)", "Cumin seeds", "Turmeric", "Green chillies & Salt"],
+            "why_recommended": "Perfect pairing of your fresh cabbage and protein-rich chicken. Light, nutritious, and ready fast.",
+            "quick_steps": [
+                "Finely shred the cabbage and shred or slice the chicken into bite-sized pieces.",
+                "Heat 1 tbsp oil in a pan, crackle cumin seeds and 1 slit green chili.",
+                "Toss in the shredded cabbage with 1/2 tsp turmeric and salt; sauté on high heat for 6 minutes until tender-crisp.",
+                "Fold in the chicken, sauté together for 4-5 minutes until steaming and well spiced, garnish with coriander."
+            ],
+            "leftover_alert": "Uses up cabbage and chicken perfectly to keep your fridge fresh!"
+        }
+
+    # 3. Cabbage + Cauliflower / Courgette
+    if has_cabbage and (has_cauliflower or has_courgette):
+        cabbage_item = next((i for i in inv if "cabbage" in str(i.get("name", "")).lower()), None)
+        other_item = next((i for i in inv if "cauliflower" in str(i.get("name", "")).lower() or "courgette" in str(i.get("name", "")).lower()), None)
+        c_name = cabbage_item.get("name", "Cabbage") if cabbage_item else "Cabbage"
+        o_name = other_item.get("name", "Cauliflower") if other_item else "Vegetable"
+        return {
+            "status": "success",
+            "source": "ramu_kaka_culinary_engine",
+            "dish_name": f"Quick Spiced {c_name} & {o_name} Sabzi (Poriyal)",
+            "prep_cook_time_minutes": min(time_mins, 20),
+            "category": "Fresh Vegetarian Side/Main",
+            "spoken_response": f"Biwiji, aapke paas {time_mins} minute hain aur fridge mein {c_name} aur {o_name} hai. Main recommend karta hoon: Quick Spiced {c_name} aur {o_name} Sabzi! 15 minute mein tazza ban jayegi.",
+            "ingredients_used": [c_name, o_name],
+            "pantry_items_needed": ["Mustard seeds / Cumin", "Curry leaves / Green chili", "Turmeric", "Salt"],
+            "why_recommended": f"Healthy, vibrant vegetable medley utilizing your fresh {c_name} and {o_name}.",
+            "quick_steps": [
+                f"Chop {c_name} and {o_name} into small uniform florets/pieces.",
+                "Heat oil in a pan, add mustard seeds and green chili.",
+                f"Add chopped {c_name} and {o_name}, sprinkle salt and turmeric.",
+                "Cover and cook on medium flame for 10-12 minutes, stirring once until tender."
+            ],
+            "leftover_alert": "Pure fresh produce from your crisper drawer."
+        }
+
+    # 4. Eggs
+    if has_eggs:
+        return {
+            "status": "success",
+            "source": "ramu_kaka_culinary_engine",
+            "dish_name": "Spicy Masala Egg Bhurji (Scrambled Eggs)",
+            "prep_cook_time_minutes": min(time_mins, 12),
+            "category": "Quick Protein Dish",
+            "spoken_response": f"Biwiji, aapke paas {time_mins} minute hain aur fridge mein Eggs hain. Main recommend karta hoon: Masala Egg Bhurji! Bas 10 minute mein ready.",
+            "ingredients_used": ["Eggs"],
+            "pantry_items_needed": ["Onion", "Tomato", "Green chili", "Butter/Oil", "Spices"],
+            "why_recommended": "Quickest protein-packed hot meal ready in under 12 minutes.",
+            "quick_steps": [
+                "Whisk eggs with a pinch of salt and black pepper.",
+                "Sauté finely chopped onion, tomato, and green chili in melted butter for 3 mins.",
+                "Pour in whisked eggs and gently scramble on medium heat for 3-4 minutes until soft and fluffy."
+            ],
+            "leftover_alert": "Great quick meal option."
+        }
+
+    # 5. Daal / Curd / Rice
+    if has_daal or has_curd:
+        main_item = "Cooked Daal" if has_daal else "Fresh Dahi (Curd)"
+        return {
+            "status": "success",
+            "source": "ramu_kaka_culinary_engine",
+            "dish_name": f"Comforting {main_item} Bowl with Jeera Tempering & Warm Roti",
+            "prep_cook_time_minutes": min(time_mins, 15),
+            "category": "Comforting Homestyle Meal",
+            "spoken_response": f"Biwiji, aapke paas {time_mins} minute hain. Fridge mein {main_item} hai. Main recommend karta hoon: Comforting {main_item} with fresh tempering aur Roti!",
+            "ingredients_used": [main_item],
+            "pantry_items_needed": ["Ghee", "Jeera (Cumin)", "Roti / Rice", "Pickle"],
+            "why_recommended": "Gentle, nutritious comfort food that comes together effortlessly in 15 minutes.",
+            "quick_steps": [
+                f"Warm the {main_item} gently in a saucepan.",
+                "In a small ladle, heat 1 tsp ghee with cumin seeds and dry red chili.",
+                "Pour sizzling tadka over the dish and serve steaming hot with warm roti."
+            ],
+            "leftover_alert": "Delicious comfort meal with zero effort."
+        }
+
+    # Default general recommendation
+    first_two_names = [i.get("name", "ingredient") for i in inv[:2]]
+    items_desc = " aur ".join(first_two_names) if first_two_names else "fridge ingredients"
+    return {
+        "status": "success",
+        "source": "ramu_kaka_culinary_engine",
+        "dish_name": f"Homestyle Tawa Stir-Fry with {first_two_names[0] if first_two_names else 'Fresh Veggies'}",
+        "prep_cook_time_minutes": min(time_mins, 20),
+        "category": "Homestyle Meal",
+        "spoken_response": f"Biwiji, aapke paas {time_mins} minute hain aur fridge mein {items_desc} hai. Main 20 minute mein ek badiya homestyle dish recommend karta hoon!",
+        "ingredients_used": first_two_names,
+        "pantry_items_needed": ["Cooking oil", "Spices (turmeric, chili, salt)", "Onion/Garlic"],
+        "why_recommended": "Nutritious and balanced dish matching your available cooking time.",
+        "quick_steps": [
+            "Chop available ingredients into bite-sized pieces.",
+            "Heat oil in a pan, add aromatics and spices.",
+            "Cook vegetables/proteins on medium heat for 12-15 minutes until tender and aromatic."
+        ],
+        "leftover_alert": "Checks all current fridge and freezer items."
+    }
+
+@api_router.post("/ramu-kaka/recommend")
+async def ramu_kaka_recommend(
+    req: RamuKakaRecommendRequest,
+    x_gemini_key: Optional[str] = Header(None)
+):
+    """
+    Ramu Kaka Voice Assistant: Recommends a dish based on time available,
+    recorded fridge/freezer inventory, and family dietary requirements.
+    """
+    api_key = get_effective_api_key(x_gemini_key)
+    time_mins = req.time_available_minutes or 20
+
+    # Fallback to smart culinary engine if no Gemini API key
+    if not api_key or not GENAI_AVAILABLE:
+        return mock_ramu_kaka_recommend(req)
+
+    # Use Gemini 2.0 Flash for creative chef recommendation
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = f"""You are Ramu Kaka, a devoted, seasoned, and respectful family cook/butler for an Indian household.
+The family matriarch/user ('Biwiji') asked: "{req.user_prompt}"
+She stated she has {time_mins} minutes available to cook.
+
+CURRENT INVENTORY (Fridge & Freezer):
+{json.dumps(req.inventory, indent=2)}
+
+HOUSEHOLD MEMBERS & DIETARY PREFERENCES:
+{json.dumps(req.household, indent=2)}
+
+TASK:
+Recommend a specific, delicious, and realistic dish that can be made in {time_mins} minutes using the available ingredients.
+Rules:
+1. If time is short (<= 15 mins) and leftovers exist, prioritize reheating/pairing leftovers.
+2. If cooking fresh, make a dish that realistically finishes in {time_mins} minutes using ingredients on hand.
+3. Strictly honor dietary preferences (e.g. Vegetarian, Halal, Elderly egg-free, Kid-friendly).
+4. For 'spoken_response', write a warm, respectful Hindi/English (Hinglish) message addressing 'Biwiji' suitable for text-to-speech.
+
+Respond with ONLY valid JSON:
+{{
+  "dish_name": "Dish Name",
+  "prep_cook_time_minutes": {time_mins},
+  "category": "Main Dish / Quick Meal",
+  "spoken_response": "Biwiji, aapke paas {time_mins} minute hain aur fridge mein ... Main recommend karta hoon: ...",
+  "ingredients_used": ["Item 1", "Item 2"],
+  "pantry_items_needed": ["Oil", "Salt", "Spices"],
+  "why_recommended": "Brief rationale",
+  "quick_steps": [
+    "Step 1...",
+    "Step 2...",
+    "Step 3..."
+  ],
+  "leftover_alert": "Optional note on existing leftovers"
+}}"""
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.2
+            )
+        )
+        parsed = json.loads(response.text)
+        parsed["status"] = "success"
+        parsed["source"] = "gemini_2.0_flash"
+        return parsed
+    except Exception as e:
+        print(f"Gemini Ramu Kaka recommendation error: {e}. Falling back to culinary engine.")
+        return mock_ramu_kaka_recommend(req)
 
 @api_router.post("/generate-plan")
 async def generate_plan(

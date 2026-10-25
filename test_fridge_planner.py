@@ -310,6 +310,29 @@ def test_analyze_video_frames_endpoint():
     assert all(i["storage_type"] == "Freezer" for i in data_freezer["items"])
     print(f"[OK] Video sweep analysis endpoint verified: {len(data['items'])} deduplicated shelf items extracted!")
 
+def test_ramu_kaka_recommend_endpoint():
+    # Test Ramu Kaka Voice Assistant recommendation with user's Cabbage + Cooked chicken
+    payload = {
+        "time_available_minutes": 20,
+        "user_prompt": "What to cook",
+        "inventory": [
+            {"name": "Cabbage", "quantity": "500 gms", "category": "raw_ingredient", "storage_type": "Fridge"},
+            {"name": "Cooked chicken", "quantity": "3 portions", "category": "cooked_leftover", "storage_type": "Fridge"}
+        ],
+        "household": [
+            {"name": "Anil", "dietary_needs": ["Halal", "High-Protein"]}
+        ]
+    }
+    res = client.post("/api/ramu-kaka/recommend", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert "dish_name" in data and len(data["dish_name"]) > 0
+    assert "Biwiji" in data.get("spoken_response", "")
+    assert "quick_steps" in data and len(data["quick_steps"]) >= 2
+    assert "cabbage" in data["dish_name"].lower() or "chicken" in data["dish_name"].lower()
+    print(f"[OK] Ramu Kaka Voice Recommendation verified: '{data['dish_name']}' in {data['prep_cook_time_minutes']} mins with spoken greeting: {data['spoken_response'][:60]}...")
+
 if __name__ == "__main__":
     try:
         test_health()
@@ -319,6 +342,7 @@ if __name__ == "__main__":
         test_parse_voice_endpoint()
         test_continuous_stream_voice_dictation()
         test_word_numbers_voice_dictation()
+        test_ramu_kaka_recommend_endpoint()
         test_analyze_video_frames_endpoint()
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()

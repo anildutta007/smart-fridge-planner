@@ -149,14 +149,9 @@ function initCaptureCenter() {
         switchCaptureMode(mode);
       }
     }
-    if (params.get("wake") === "ramukaka" || params.has("ramukaka")) {
+    if (params.get("wake") === "ramukaka" || params.has("ramukaka") || params.has("assistant")) {
       setTimeout(() => {
-        showToast("👋 Namaste! Ramu Kaka at your service. Ready to document your food.", "success");
-        const btnRecord = document.getElementById("btnVoiceRecord");
-        if (btnRecord) {
-          btnRecord.classList.add("ring-4", "ring-emerald-400", "ring-offset-2");
-          setTimeout(() => btnRecord.classList.remove("ring-4", "ring-emerald-400", "ring-offset-2"), 4500);
-        }
+        openRamuKakaModal(true);
       }, 500);
     }
   } catch (_) {}
@@ -2173,4 +2168,688 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+
+// ==========================================
+// 6. RAMU KAKA CONVERSATIONAL VOICE ASSISTANT
+// ==========================================
+const ramuState = {
+  isOpen: false,
+  isMuted: false,
+  isListening: false,
+  isSpeaking: false,
+  conversationStep: "GREETING", // GREETING -> WAIT_INTENT -> ASK_TIME -> WAIT_TIME -> RECOMMENDING -> DONE
+  timeAvailableMinutes: 20,
+  userIntent: "",
+  activeRecommendation: null,
+  recognitionInstance: null,
+  messages: []
+};
+
+function openRamuKakaModal(autoGreet = true) {
+  const modal = document.getElementById("ramuKakaModal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  ramuState.isOpen = true;
+
+  // Update inventory count pill
+  const invHint = document.getElementById("ramuInventoryHint");
+  if (invHint) {
+    const leftCount = appState.inventory.filter(i => i.category === "cooked_leftover").length;
+    const rawCount = appState.inventory.filter(i => i.category === "raw_ingredient").length;
+    invHint.textContent = `${appState.inventory.length} items (${leftCount} Leftovers, ${rawCount} Fresh)`;
+  }
+
+  if (autoGreet) {
+    restartRamuConversation();
+  }
+}
+
+function closeRamuKakaModal() {
+  const modal = document.getElementById("ramuKakaModal");
+  if (modal) modal.classList.add("hidden");
+  ramuState.isOpen = false;
+
+  // Cancel any active speech or recognition
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  if (ramuState.recognitionInstance) {
+    try { ramuState.recognitionInstance.abort(); } catch (_) {}
+  }
+  ramuState.isSpeaking = false;
+  ramuState.isListening = false;
+  updateRamuWaveUI();
+}
+
+function toggleRamuMute() {
+  ramuState.isMuted = !ramuState.isMuted;
+  const icon = document.getElementById("ramuMuteIcon");
+  if (icon) {
+    icon.className = ramuState.isMuted ? "ph-bold ph-speaker-slash text-lg text-amber-200" : "ph-bold ph-speaker-high text-lg text-white";
+  }
+  if (ramuState.isMuted && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+    ramuState.isSpeaking = false;
+    updateRamuWaveUI();
+  }
+  showToast(ramuState.isMuted ? "Ramu Kaka voice audio muted." : "Ramu Kaka voice audio enabled.", "info");
+}
+
+function restartRamuConversation() {
+  ramuState.conversationStep = "GREETING";
+  ramuState.userIntent = "";
+  ramuState.activeRecommendation = null;
+  ramuState.messages = [];
+
+  const container = document.getElementById("ramuDialogueContainer");
+  if (container) container.innerHTML = "";
+
+  const dishCardContainer = document.getElementById("ramuDishCardContainer");
+  if (dishCardContainer) {
+    dishCardContainer.classList.add("hidden");
+    dishCardContainer.innerHTML = "";
+  }
+
+  // Initial prompt: "Biwiji, boliye kya hukum?"
+  const greeting = "Biwiji, boliye kya hukum?";
+  addRamuChatMessage("ramu", greeting);
+
+  renderRamuQuickChips([
+    { label: "What to cook?", value: "What to cook" },
+    { label: "Suggest dinner", value: "What should I make for dinner?" },
+    { label: "Quick 15-min meal", value: "Suggest a quick 15 minute dish" },
+    { label: "Check leftovers", value: "What leftovers can we eat?" }
+  ]);
+
+  setRamuStatus("🗣️ Ramu Kaka: Biwiji, boliye kya hukum?", "speaking");
+
+  speakRamuKaka("Biwiji, boliye kya hukum?", () => {
+    ramuState.conversationStep = "WAIT_INTENT";
+    setRamuStatus("🔴 Listening... Say 'What to cook' (or tap below)", "listening");
+    startRamuListening();
+  });
+}
+
+function speakRamuKaka(text, onEnd) {
+  if (ramuState.isMuted || !('speechSynthesis' in window)) {
+    if (onEnd) onEnd();
+    return;
+  }
+
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+
+    // Pick best available voice (prefer en-IN or hi-IN or natural English)
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v => {
+      const name = (v.name || "").toLowerCase();
+      const lang = (v.lang || "").toLowerCase();
+      return lang.includes("in") || name.includes("india") || name.includes("rishi") || name.includes("lekha") || name.includes("veena") || name.includes("neerja");
+    }) || voices.find(v => v.lang.startsWith("en"));
+
+    if (preferredVoice) utterance.voice = preferredVoice;
+    utterance.rate = 0.98;
+    utterance.pitch = 0.95;
+
+    ramuState.isSpeaking = true;
+    updateRamuWaveUI();
+
+    utterance.onend = () => {
+      ramuState.isSpeaking = false;
+      updateRamuWaveUI();
+      if (onEnd) onEnd();
+    };
+    utterance.onerror = () => {
+      ramuState.isSpeaking = false;
+      updateRamuWaveUI();
+      if (onEnd) onEnd();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  } catch (err) {
+    console.warn("Speech synthesis error:", err);
+    ramuState.isSpeaking = false;
+    updateRamuWaveUI();
+    if (onEnd) onEnd();
+  }
+}
+
+function startRamuListening() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) {
+    setRamuStatus("Voice dictation not available. Please tap an option below.", "info");
+    return;
+  }
+
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+  if (ramuState.recognitionInstance) {
+    try { ramuState.recognitionInstance.abort(); } catch (_) {}
+  }
+
+  try {
+    const rec = new SpeechRec();
+    ramuState.recognitionInstance = rec;
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = "en-IN";
+
+    rec.onstart = () => {
+      ramuState.isListening = true;
+      updateRamuWaveUI();
+      updateRamuMicButton(true);
+    };
+
+    rec.onresult = (e) => {
+      const transcript = e.results?.[0]?.[0]?.transcript || "";
+      if (transcript.trim()) {
+        handleUserSpokenInput(transcript.trim());
+      }
+    };
+
+    rec.onerror = (err) => {
+      console.warn("Ramu speech recognition notice:", err.error);
+      ramuState.isListening = false;
+      updateRamuWaveUI();
+      updateRamuMicButton(false);
+      if (err.error === "no-speech") {
+        setRamuStatus("Didn't catch that. Tap the mic or choose an option below.", "info");
+      }
+    };
+
+    rec.onend = () => {
+      ramuState.isListening = false;
+      updateRamuWaveUI();
+      updateRamuMicButton(false);
+    };
+
+    rec.start();
+  } catch (e) {
+    console.error("Failed to start speech recognition:", e);
+    ramuState.isListening = false;
+    updateRamuWaveUI();
+    updateRamuMicButton(false);
+  }
+}
+
+function toggleRamuListening() {
+  if (ramuState.isListening) {
+    if (ramuState.recognitionInstance) {
+      try { ramuState.recognitionInstance.stop(); } catch (_) {}
+    }
+    ramuState.isListening = false;
+    updateRamuWaveUI();
+    updateRamuMicButton(false);
+  } else {
+    startRamuListening();
+  }
+}
+
+function parseRamuTime(str) {
+  if (!str) return 20;
+  const s = str.toLowerCase();
+
+  if (s.includes("half an hour") || s.includes("half hour") || s.includes("adhe ghante")) return 30;
+  if (s.includes("an hour") || s.includes("one hour") || s.includes("1 hour") || s.includes("ek ghanta")) return 60;
+
+  const m = s.match(/(\d+)\s*(?:mins?|minutes?|m\b)?/);
+  if (m) return parseInt(m[1], 10);
+
+  if (s.includes("quick") || s.includes("jaldi") || s.includes("fast")) return 10;
+  if (s.includes("ten")) return 10;
+  if (s.includes("fifteen")) return 15;
+  if (s.includes("twenty five")) return 25;
+  if (s.includes("twenty")) return 20;
+  if (s.includes("thirty")) return 30;
+  if (s.includes("forty five")) return 45;
+  if (s.includes("forty")) return 40;
+  return 20;
+}
+
+function handleUserSpokenInput(text) {
+  addRamuChatMessage("user", text);
+
+  if (ramuState.conversationStep === "WAIT_INTENT" || ramuState.conversationStep === "GREETING") {
+    ramuState.userIntent = text;
+
+    // Check if user already stated time in this sentence (e.g. "what to cook in 20 minutes")
+    const hasSpecificTime = /(\d+\s*(?:mins?|minutes?|hours?)|half\s+an?\s+hour|quick|jaldi)/i.test(text);
+    if (hasSpecificTime) {
+      const timeMins = parseRamuTime(text);
+      ramuState.timeAvailableMinutes = timeMins;
+      ramuFetchRecommendation(timeMins);
+    } else {
+      // Step 2: Ramu Kaka asks: "How much time do you have?"
+      ramuAskTime();
+    }
+  } else if (ramuState.conversationStep === "WAIT_TIME" || ramuState.conversationStep === "ASK_TIME") {
+    const timeMins = parseRamuTime(text);
+    ramuState.timeAvailableMinutes = timeMins;
+    ramuFetchRecommendation(timeMins);
+  } else {
+    // If conversation is in DONE or other state:
+    if (/another|different|aur kuch|kuch aur|second/i.test(text)) {
+      ramuFetchRecommendation(ramuState.timeAvailableMinutes, true);
+    } else {
+      ramuState.userIntent = text;
+      ramuAskTime();
+    }
+  }
+}
+
+function ramuAskTime() {
+  ramuState.conversationStep = "ASK_TIME";
+  const question = "Ji Biwiji, how much time do you have to cook?";
+  addRamuChatMessage("ramu", question);
+
+  renderRamuQuickChips([
+    { label: "10 mins (Quick)", value: "10 minutes" },
+    { label: "15 mins", value: "15 minutes" },
+    { label: "20 mins", value: "20 minutes" },
+    { label: "30 mins", value: "30 minutes" },
+    { label: "45+ mins", value: "45 minutes" }
+  ]);
+
+  setRamuStatus("🗣️ Ramu Kaka: How much time do you have?", "speaking");
+
+  speakRamuKaka("Ji Biwiji, kitna samay hai aapke paas? How much time do you have?", () => {
+    ramuState.conversationStep = "WAIT_TIME";
+    setRamuStatus("🔴 Listening... Say '20 minutes' or tap an option", "listening");
+    startRamuListening();
+  });
+}
+
+async function ramuFetchRecommendation(timeMins, isAlternative = false) {
+  ramuState.conversationStep = "RECOMMENDING";
+  renderRamuQuickChips([]);
+  setRamuStatus("🔍 Ramu Kaka is inspecting your fridge & freezer...", "info");
+
+  const waitMsg = isAlternative
+    ? "Ji Biwiji, main doosra vikalp check karta hoon..."
+    : `Ji Biwiji, ${timeMins} minute ke liye main fridge check karke swadisht dish recommend karta hoon...`;
+  addRamuChatMessage("ramu", waitMsg);
+
+  speakRamuKaka(waitMsg);
+
+  try {
+    let rec = null;
+
+    // 1. Call backend endpoint /api/ramu-kaka/recommend
+    try {
+      const headers = { "Content-Type": "application/json" };
+      if (appState.apiKey) headers["X-Gemini-Key"] = appState.apiKey;
+
+      const res = await fetch("/api/ramu-kaka/recommend", {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify({
+          time_available_minutes: timeMins,
+          user_prompt: ramuState.userIntent || "What to cook",
+          inventory: appState.inventory,
+          household: appState.families[appState.activeFamilyId]?.household || [],
+          preferences: isAlternative ? "Suggest an alternative dish" : ""
+        })
+      });
+
+      if (res.ok) {
+        rec = await res.json();
+      }
+    } catch (apiErr) {
+      console.warn("Backend Ramu Kaka API call failed, using client fallback:", apiErr);
+    }
+
+    // 2. Client-side fallback if backend unavailable
+    if (!rec || !rec.dish_name) {
+      rec = clientRamuKakaRecommend(timeMins, appState.inventory, isAlternative);
+    }
+
+    ramuState.activeRecommendation = rec;
+    ramuState.conversationStep = "DONE";
+
+    // Render visual dish card
+    renderRamuDishCard(rec);
+
+    // Add Ramu Kaka response to chat
+    addRamuChatMessage("ramu", rec.spoken_response);
+
+    // Speak out recommendation
+    setRamuStatus("🗣️ Ramu Kaka is speaking the recommendation...", "speaking");
+    speakRamuKaka(rec.spoken_response, () => {
+      setRamuStatus("✨ Ready! You can ask another dish or start cooking.", "success");
+    });
+
+    renderRamuQuickChips([
+      { label: "🔄 Suggest Another Dish", value: "Suggest another dish" },
+      { label: "🍳 Cook This Dish", value: "__COOK_NOW__" },
+      { label: "🎤 Ask Something Else", value: "What else can I make?" }
+    ]);
+  } catch (err) {
+    console.error("Ramu Kaka recommendation error:", err);
+    setRamuStatus("Could not complete recommendation. Please try again.", "error");
+  }
+}
+
+function clientRamuKakaRecommend(timeMins, inv, isAlternative = false) {
+  const items = Array.isArray(inv) ? inv : [];
+  const leftovers = items.filter(i => i.category === "cooked_leftover");
+  const namesLower = items.map(i => (i.name || "").toLowerCase());
+
+  const hasChicken = namesLower.some(n => n.includes("chicken"));
+  const hasCabbage = namesLower.some(n => n.includes("cabbage"));
+  const hasCauliflower = namesLower.some(n => n.includes("cauliflower") || n.includes("gobi"));
+  const hasCourgette = namesLower.some(n => n.includes("courgette") || n.includes("zucchini"));
+  const hasDaal = namesLower.some(n => n.includes("daal") || n.includes("dal"));
+  const hasEggs = namesLower.some(n => n.includes("egg"));
+  const hasCurd = namesLower.some(n => n.includes("curd") || n.includes("dahi") || n.includes("yogurt"));
+
+  // 1. Fast reheat (<= 10 mins) with leftovers
+  if (timeMins <= 10 && leftovers.length > 0) {
+    const top = leftovers[0];
+    return {
+      dish_name: `Quick Reheated ${top.name} with Fresh Ghee Tempering`,
+      prep_cook_time_minutes: Math.min(timeMins, 8),
+      category: "Quick Leftover Reheat",
+      spoken_response: `Biwiji, aapke paas bas ${timeMins} minute hain! Fridge mein ready ${top.name} (${top.quantity || '1 portion'}) hai. Bas 5 minute mein tawa ya microwave mein garam karke enjoy kijiye!`,
+      ingredients_used: [`${top.name} (${top.quantity || '1 portion'})`],
+      pantry_items_needed: ["Ghee or Butter", "Pinch of cumin or fresh coriander"],
+      why_recommended: `Uses high-priority leftover ${top.name} to save cooking time and prevent food waste.`,
+      quick_steps: [
+        `Take the ${top.name} from the fridge.`,
+        "Warm thoroughly in a pan with 1 tsp ghee or microwave for 2-3 minutes.",
+        "Sprinkle with fresh coriander or lemon juice and serve warm with bread or papad."
+      ],
+      leftover_alert: `Zero food waste: Finished delicious ${top.name} within ${timeMins} minutes!`
+    };
+  }
+
+  // 2. Cabbage + Chicken
+  if (hasCabbage && hasChicken && !isAlternative) {
+    const cItem = items.find(i => (i.name || "").toLowerCase().includes("cabbage"));
+    const chItem = items.find(i => (i.name || "").toLowerCase().includes("chicken"));
+    const cQty = cItem?.quantity || "500 gms";
+    const chQty = chItem?.quantity || "3 portions";
+    return {
+      dish_name: "Quick Homestyle Spiced Cabbage & Chicken Stir-Fry (Bandhakopi Murgh)",
+      prep_cook_time_minutes: 15,
+      category: "High-Protein Main Dish",
+      spoken_response: `Biwiji, aapke paas ${timeMins} minute hain aur fridge mein ${cQty} Cabbage aur ${chQty} Chicken hai! Main recommend karta hoon: Quick Cabbage & Chicken Stir-Fry! Yeh 15 minute mein swadisht ban jayega.`,
+      ingredients_used: [`Cabbage (${cQty})`, `Chicken (${chQty})`],
+      pantry_items_needed: ["Cooking oil (1-2 tbsp)", "Cumin seeds", "Turmeric", "Green chillies & Salt"],
+      why_recommended: "Perfect pairing of your fresh cabbage and protein-rich chicken. Light, nutritious, and ready fast.",
+      quick_steps: [
+        "Finely shred the cabbage and shred or slice the chicken into bite-sized pieces.",
+        "Heat 1 tbsp oil in a kadai/pan, crackle cumin seeds and 1 slit green chili.",
+        "Toss in the shredded cabbage with 1/2 tsp turmeric and salt; sauté on high heat for 6 minutes until tender-crisp.",
+        "Fold in the chicken, sauté together for 4-5 minutes until steaming and well spiced, garnish with coriander."
+      ],
+      leftover_alert: "Uses up cabbage and chicken perfectly to keep your fridge fresh!"
+    };
+  }
+
+  // 3. Cabbage + Cauliflower / Courgette
+  if (hasCabbage && (hasCauliflower || hasCourgette)) {
+    const cName = hasCauliflower ? "Cauliflower" : "Courgette";
+    return {
+      dish_name: `Quick Spiced Cabbage & ${cName} Sabzi (Poriyal)`,
+      prep_cook_time_minutes: Math.min(timeMins, 20),
+      category: "Fresh Vegetarian Side/Main",
+      spoken_response: `Biwiji, aapke paas ${timeMins} minute hain aur fridge mein Cabbage aur ${cName} hai. Main recommend karta hoon: Quick Spiced Cabbage aur ${cName} Sabzi! 15 minute mein tazza ban jayegi.`,
+      ingredients_used: ["Cabbage", cName],
+      pantry_items_needed: ["Mustard seeds / Cumin", "Curry leaves / Green chili", "Turmeric", "Salt"],
+      why_recommended: `Healthy, vibrant vegetable medley utilizing your fresh cabbage and ${cName}.`,
+      quick_steps: [
+        `Chop cabbage and ${cName} into small uniform florets/pieces.`,
+        "Heat oil in a pan, add mustard seeds and green chili.",
+        `Add chopped cabbage and ${cName}, sprinkle salt and turmeric.`,
+        "Cover and cook on medium flame for 10-12 minutes, stirring once until tender."
+      ],
+      leftover_alert: "Pure fresh produce from your crisper drawer."
+    };
+  }
+
+  // 4. Eggs
+  if (hasEggs) {
+    return {
+      dish_name: "Spicy Masala Egg Bhurji (Scrambled Eggs)",
+      prep_cook_time_minutes: Math.min(timeMins, 12),
+      category: "Quick Protein Dish",
+      spoken_response: `Biwiji, aapke paas ${timeMins} minute hain aur fridge mein Eggs hain. Main recommend karta hoon: Masala Egg Bhurji! Bas 10 minute mein ready.`,
+      ingredients_used: ["Eggs"],
+      pantry_items_needed: ["Onion", "Tomato", "Green chili", "Butter/Oil", "Spices"],
+      why_recommended: "Quickest protein-packed hot meal ready in under 12 minutes.",
+      quick_steps: [
+        "Whisk eggs with a pinch of salt and black pepper.",
+        "Sauté finely chopped onion, tomato, and green chili in melted butter for 3 mins.",
+        "Pour in whisked eggs and gently scramble on medium heat for 3-4 minutes until soft and fluffy."
+      ],
+      leftover_alert: "Great quick meal option."
+    };
+  }
+
+  // 5. Daal / Curd
+  if (hasDaal || hasCurd) {
+    const mainItem = hasDaal ? "Cooked Daal" : "Fresh Dahi (Curd)";
+    return {
+      dish_name: `Comforting ${mainItem} Bowl with Jeera Tempering & Warm Roti`,
+      prep_cook_time_minutes: Math.min(timeMins, 15),
+      category: "Comforting Homestyle Meal",
+      spoken_response: `Biwiji, aapke paas ${timeMins} minute hain. Fridge mein ${mainItem} hai. Main recommend karta hoon: Comforting ${mainItem} with fresh tempering aur Roti!`,
+      ingredients_used: [mainItem],
+      pantry_items_needed: ["Ghee", "Jeera (Cumin)", "Roti / Rice", "Pickle"],
+      why_recommended: "Gentle, nutritious comfort food that comes together effortlessly in 15 minutes.",
+      quick_steps: [
+        `Warm the ${mainItem} gently in a saucepan.`,
+        "In a small ladle, heat 1 tsp ghee with cumin seeds and dry red chili.",
+        "Pour sizzling tadka over the dish and serve steaming hot with warm roti."
+      ],
+      leftover_alert: "Delicious comfort meal with zero effort."
+    };
+  }
+
+  // Default general recommendation
+  const firstTwo = items.slice(0, 2).map(i => i.name);
+  const itemsText = firstTwo.join(" and ") || "fresh fridge ingredients";
+  return {
+    dish_name: `Homestyle Tawa Stir-Fry with ${firstTwo[0] || 'Fresh Ingredients'}`,
+    prep_cook_time_minutes: Math.min(timeMins, 20),
+    category: "Homestyle Meal",
+    spoken_response: `Biwiji, aapke paas ${timeMins} minute hain aur fridge mein ${itemsText} hai. Main 20 minute mein ek badiya homestyle dish recommend karta hoon!`,
+    ingredients_used: firstTwo,
+    pantry_items_needed: ["Cooking oil", "Spices (turmeric, chili, salt)", "Onion/Garlic"],
+    why_recommended: "Nutritious and balanced dish matching your available cooking time.",
+    quick_steps: [
+      "Chop available ingredients into bite-sized pieces.",
+      "Heat oil in a pan, add aromatics and spices.",
+      "Cook vegetables/proteins on medium heat for 12-15 minutes until tender and aromatic."
+    ],
+    leftover_alert: "Checks all current fridge and freezer items."
+  };
+}
+
+function addRamuChatMessage(sender, text) {
+  const container = document.getElementById("ramuDialogueContainer");
+  if (!container) return;
+
+  const msgDiv = document.createElement("div");
+  msgDiv.className = sender === "ramu"
+    ? "flex items-start space-x-2.5 max-w-[88%]"
+    : "flex items-start space-x-2.5 max-w-[88%] ml-auto flex-row-reverse space-x-reverse";
+
+  if (sender === "ramu") {
+    msgDiv.innerHTML = `
+      <div class="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center text-sm shadow-xs flex-shrink-0">
+        👨‍🍳
+      </div>
+      <div class="chat-bubble-ramu p-3 rounded-2xl rounded-tl-xs text-xs sm:text-sm font-medium shadow-2xs leading-relaxed">
+        ${escapeHtml(text)}
+      </div>
+    `;
+  } else {
+    msgDiv.innerHTML = `
+      <div class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm shadow-xs flex-shrink-0 font-bold">
+        👤
+      </div>
+      <div class="chat-bubble-user p-3 rounded-2xl rounded-tr-xs text-xs sm:text-sm font-semibold shadow-2xs leading-relaxed">
+        ${escapeHtml(text)}
+      </div>
+    `;
+  }
+
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+}
+
+function renderRamuQuickChips(chips) {
+  const container = document.getElementById("ramuQuickChips");
+  if (!container) return;
+
+  if (!chips || chips.length === 0) {
+    container.innerHTML = "";
+    container.classList.add("hidden");
+    return;
+  }
+
+  container.classList.remove("hidden");
+  container.innerHTML = chips.map(chip => `
+    <button onclick="handleRamuChipClick('${escapeHtml(chip.value)}')" class="px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200/80 transition active:scale-95 shadow-2xs cursor-pointer">
+      ${escapeHtml(chip.label)}
+    </button>
+  `).join("");
+}
+
+function handleRamuChipClick(val) {
+  if (val === "__COOK_NOW__") {
+    if (ramuState.activeRecommendation) {
+      showToast(`🍳 Marked '${ramuState.activeRecommendation.dish_name}' for cooking! Happy cooking, Biwiji!`, "success");
+      closeRamuKakaModal();
+    }
+    return;
+  }
+  handleUserSpokenInput(val);
+}
+
+function renderRamuDishCard(rec) {
+  const container = document.getElementById("ramuDishCardContainer");
+  if (!container || !rec) return;
+
+  container.classList.remove("hidden");
+  const ingTags = (rec.ingredients_used || []).map(ing => `
+    <span class="inline-flex items-center space-x-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+      <i class="ph-bold ph-check text-emerald-600"></i>
+      <span>${escapeHtml(ing)}</span>
+    </span>
+  `).join("");
+
+  const stepsList = (rec.quick_steps || []).map((step, idx) => `
+    <li class="flex items-start space-x-2 text-xs text-slate-700">
+      <span class="w-4 h-4 rounded-full bg-amber-500 text-white font-bold text-[10px] flex items-center justify-center flex-shrink-0 mt-0.5">${idx+1}</span>
+      <span>${escapeHtml(step)}</span>
+    </li>
+  `).join("");
+
+  container.innerHTML = `
+    <div class="bg-white rounded-2xl p-4 shadow-sm border border-amber-200/90 space-y-3">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <span class="text-[10px] font-bold uppercase tracking-wider text-amber-700 px-2 py-0.5 bg-amber-100 rounded-full">Ramu Kaka's Recommendation</span>
+          <h4 class="text-sm sm:text-base font-extrabold text-slate-900 mt-1 flex items-center space-x-1.5">
+            <span>🍳</span>
+            <span>${escapeHtml(rec.dish_name)}</span>
+          </h4>
+        </div>
+        <div class="text-right flex-shrink-0">
+          <span class="inline-flex items-center space-x-1 text-xs font-bold px-2.5 py-1 bg-orange-100 text-orange-800 rounded-xl">
+            <i class="ph-bold ph-clock text-orange-600"></i>
+            <span>${rec.prep_cook_time_minutes || 20} mins</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Ingredients used from fridge -->
+      <div>
+        <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">From Your Fridge & Freezer:</p>
+        <div class="flex flex-wrap gap-1.5">
+          ${ingTags || '<span class="text-xs text-slate-500">Fresh fridge produce</span>'}
+        </div>
+      </div>
+
+      <!-- Quick Steps -->
+      <div>
+        <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Quick Preparation Steps:</p>
+        <ul class="space-y-1.5">
+          ${stepsList}
+        </ul>
+      </div>
+
+      ${rec.leftover_alert ? `
+        <div class="p-2 rounded-xl bg-emerald-50 border border-emerald-100 text-[11px] text-emerald-800 font-medium flex items-center space-x-1.5">
+          <i class="ph-bold ph-sparkle text-emerald-600 text-sm"></i>
+          <span>${escapeHtml(rec.leftover_alert)}</span>
+        </div>
+      ` : ''}
+
+      <!-- Action buttons -->
+      <div class="flex items-center space-x-2 pt-2 border-t border-slate-100">
+        <button onclick="handleRamuChipClick('__COOK_NOW__')" class="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-xs font-bold hover:from-emerald-700 hover:to-teal-700 transition shadow-xs flex items-center justify-center space-x-1 cursor-pointer">
+          <i class="ph-bold ph-fire"></i>
+          <span>Let's Cook This!</span>
+        </button>
+        <button onclick="ramuFetchRecommendation(${rec.prep_cook_time_minutes || 20}, true)" class="py-2 px-3 rounded-xl border border-amber-300 text-amber-800 hover:bg-amber-50 text-xs font-semibold transition flex items-center space-x-1 cursor-pointer">
+          <i class="ph-bold ph-arrows-clockwise"></i>
+          <span>Another Dish</span>
+        </button>
+      </div>
+    </div>
+  `;
+
+  const dialogueContainer = document.getElementById("ramuDialogueContainer");
+  if (dialogueContainer) dialogueContainer.scrollTop = dialogueContainer.scrollHeight;
+}
+
+function setRamuStatus(label, type) {
+  const lbl = document.getElementById("ramuStatusLabel");
+  const dot = document.getElementById("ramuStatusDot");
+  if (lbl) lbl.textContent = label;
+
+  if (dot) {
+    if (type === "listening") {
+      dot.className = "w-2.5 h-2.5 rounded-full bg-red-500 animate-ping";
+    } else if (type === "speaking") {
+      dot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse";
+    } else if (type === "success") {
+      dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500";
+    } else {
+      dot.className = "w-2.5 h-2.5 rounded-full bg-slate-400";
+    }
+  }
+}
+
+function updateRamuWaveUI() {
+  const wave = document.getElementById("ramuWaveIndicator");
+  if (!wave) return;
+  if (ramuState.isSpeaking || ramuState.isListening) {
+    wave.classList.remove("hidden");
+    wave.classList.add("flex");
+  } else {
+    wave.classList.add("hidden");
+    wave.classList.remove("flex");
+  }
+}
+
+function updateRamuMicButton(isListening) {
+  const btn = document.getElementById("btnRamuMicToggle");
+  const icon = document.getElementById("ramuMicIcon");
+  const label = document.getElementById("ramuMicLabel");
+  if (!btn) return;
+
+  if (isListening) {
+    btn.className = "flex-1 py-3 px-4 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-lg animate-pulse transition active:scale-95 cursor-pointer";
+    if (icon) icon.className = "ph-bold ph-stop text-lg";
+    if (label) label.textContent = "Listening... (Tap when done)";
+  } else {
+    btn.className = "flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-md active:scale-95 transition cursor-pointer";
+    if (icon) icon.className = "ph-bold ph-microphone text-lg";
+    if (label) label.textContent = "Tap to Speak";
+  }
 }

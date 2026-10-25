@@ -58,6 +58,13 @@
           </span>
         </div>
 
+        <!-- Ramu Kaka Voice Assistant Trigger -->
+        <button id="btnRamuKakaAssistant" onclick="openRamuKakaModal(true)" class="text-xs font-bold flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-700 text-white shadow-xs transition active:scale-95 cursor-pointer" title="Talk to Ramu Kaka: 'Biwiji Boliye Kya Hukum'">
+          <i class="ph-bold ph-cooking-pot text-sm"></i>
+          <span>Ramu Kaka</span>
+          <span class="text-[9px] px-1.5 py-0.2 bg-white/25 text-white rounded-full uppercase tracking-wider font-extrabold animate-pulse">Voice</span>
+        </button>
+
         <!-- Family Profile Selector -->
         <button id="btnFamilyProfile" onclick="openFamilyModal()" class="text-xs font-semibold flex items-center space-x-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition shadow-xs cursor-pointer" title="Family Profile & Storage">
           <i class="ph-bold ph-house-line text-sm text-emerald-600"></i>
@@ -737,6 +744,89 @@
 
 
   <!-- ========================================== -->
+  <!-- MODAL: RAMU KAKA VOICE ASSISTANT           -->
+  <!-- ========================================== -->
+  <div id="ramuKakaModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-amber-200 overflow-hidden flex flex-col max-h-[92vh]">
+      
+      <!-- Header -->
+      <div class="p-4 sm:p-5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white flex items-center justify-between shadow-xs">
+        <div class="flex items-center space-x-3">
+          <div class="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-2xl shadow-inner border border-white/30">
+            👨‍🍳
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <h3 class="text-base font-extrabold tracking-tight">Ramu Kaka</h3>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/25 text-white tracking-wider uppercase">Voice AI</span>
+            </div>
+            <p class="text-xs text-amber-100 font-medium">Family Cook & Smart Fridge Butler</p>
+          </div>
+        </div>
+        <div class="flex items-center space-x-1">
+          <!-- Voice Audio Mute/Unmute Toggle -->
+          <button id="btnRamuMute" onclick="toggleRamuMute()" class="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer" title="Mute/Unmute Voice Audio">
+            <i id="ramuMuteIcon" class="ph-bold ph-speaker-high text-lg"></i>
+          </button>
+          <!-- Close button -->
+          <button onclick="closeRamuKakaModal()" class="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer" title="Close Assistant">
+            <i class="ph-bold ph-x text-lg"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Voice Status & Waveform Bar -->
+      <div class="bg-amber-50/80 border-b border-amber-200/70 px-4 py-2.5 flex items-center justify-between text-xs">
+        <div class="flex items-center space-x-2">
+          <!-- Sound wave bars -->
+          <div id="ramuWaveIndicator" class="hidden items-center space-x-1">
+            <span class="ramu-wave-bar"></span>
+            <span class="ramu-wave-bar"></span>
+            <span class="ramu-wave-bar"></span>
+            <span class="ramu-wave-bar"></span>
+            <span class="ramu-wave-bar"></span>
+          </div>
+          <span id="ramuStatusDot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span id="ramuStatusLabel" class="font-semibold text-amber-900">Ramu Kaka is ready</span>
+        </div>
+        <span id="ramuInventoryHint" class="text-[11px] text-amber-800 font-medium bg-amber-100/70 px-2 py-0.5 rounded-full">Live fridge</span>
+      </div>
+
+      <!-- Dialogue / Conversation History -->
+      <div id="ramuDialogueContainer" class="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 bg-slate-50/50 min-h-[160px] max-h-[360px]">
+        <!-- Dynamic chat messages inserted here -->
+      </div>
+
+      <!-- Quick Suggestion Chips (Contextual) -->
+      <div id="ramuQuickChips" class="px-4 py-2.5 bg-white border-t border-slate-100 flex items-center gap-1.5 flex-wrap">
+        <!-- Dynamic quick chips inserted here -->
+      </div>
+
+      <!-- Recommended Dish Card Container (Appears when dish is ready) -->
+      <div id="ramuDishCardContainer" class="hidden p-4 bg-gradient-to-br from-amber-50 via-orange-50/40 to-white border-t border-amber-200 overflow-y-auto max-h-[290px]">
+        <!-- Dynamic Dish Details inserted here -->
+      </div>
+
+      <!-- Footer & Microphone Control -->
+      <div class="p-3.5 sm:p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-2.5">
+        <button id="btnRamuMicToggle" onclick="toggleRamuListening()" class="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-md active:scale-95 transition cursor-pointer">
+          <i id="ramuMicIcon" class="ph-bold ph-microphone text-lg"></i>
+          <span id="ramuMicLabel">Tap to Speak</span>
+        </button>
+        <button onclick="restartRamuConversation()" class="p-3 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold flex items-center space-x-1 cursor-pointer" title="Restart Conversation">
+          <i class="ph-bold ph-arrows-clockwise text-base"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Floating Ramu Kaka Action Button for Mobile -->
+  <button onclick="openRamuKakaModal(true)" class="sm:hidden fixed bottom-5 right-5 z-40 bg-gradient-to-tr from-amber-500 to-orange-500 text-white p-3.5 rounded-full shadow-xl flex items-center justify-center active:scale-90 transition border-2 border-white" title="Ask Ramu Kaka: 'Biwiji Boliye Kya Hukum'">
+    <i class="ph-bold ph-cooking-pot text-2xl"></i>
+  </button>
+
+  <!-- ========================================== -->
   <!-- MODAL: GEMINI API KEY SETTINGS             -->
   <!-- ========================================== -->
   <div id="settingsModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
@@ -774,6 +864,6 @@
   </div>
 
   <!-- App Script with cache buster -->
-  <script src="app.js?v=2.2.3"></script>
+  <script src="app.js?v=2.2.4"></script>
 </body>
 </html>
