@@ -9,16 +9,21 @@ const appState = {
   families: {},
   activeFamilyId: "family-default",
   apiKey: localStorage.getItem("smartfridge_gemini_api_key") || "",
-  captureMode: "voice", // 'voice' | 'video' | 'camera' | 'type'
-  currentFilter: "all", // 'all' | 'fridge' | 'freezer' | 'cooked_leftover' | 'raw_ingredient'
+  captureMode: "voice", // 'voice' | 'receipt' | 'camera' | 'type'
+  currentFilter: "all", // 'all' | 'fridge' | 'freezer' | 'pantry' | 'cooked_leftover' | 'raw_ingredient'
   searchQuery: "",
   currentImageBase64: null,
   currentImageFile: null,
   webcamStream: null,
-  videoSweepStream: null,
-  videoSweepInterval: null,
-  videoSweepSecondsElapsed: 0,
-  videoKeyframes: [],
+  scannedReceiptItems: [],
+  currentReceiptBase64: null,
+  dishes: [],
+  dishesFilter: "all",
+  dishesSearchQuery: "",
+  dishModalIngredients: [],
+  isListeningDishVoice: false,
+  dishSpeechInstance: null,
+  lastInventoryBackup: null,
   speechRecognitionInstance: null,
   isRecordingSpeech: false,
   generatedPlan: null
@@ -30,9 +35,12 @@ const appState = {
 document.addEventListener("DOMContentLoaded", () => {
   initStorage();
   initCaptureCenter();
+  initReceiptScanner();
+  loadDishes();
   initPlanDates();
   updateVisionStatusIndicator();
   renderInventory();
+  renderDishes();
   updateHeaderCounters();
 });
 
@@ -145,7 +153,7 @@ function initCaptureCenter() {
     const params = new URLSearchParams(window.location.search);
     if (params.has("mode")) {
       const mode = params.get("mode").toLowerCase();
-      if (["voice", "video", "camera", "type"].includes(mode)) {
+      if (["voice", "receipt", "camera", "type"].includes(mode)) {
         switchCaptureMode(mode);
       }
     }
@@ -160,12 +168,12 @@ function initCaptureCenter() {
 function switchCaptureMode(mode) {
   appState.captureMode = mode;
   const btnVoice = document.getElementById("btnTabVoice");
-  const btnVideo = document.getElementById("btnTabVideo");
+  const btnReceipt = document.getElementById("btnTabReceipt");
   const btnCamera = document.getElementById("btnTabCamera");
   const btnType = document.getElementById("btnTabType");
 
   const panelVoice = document.getElementById("panelVoice");
-  const panelVideo = document.getElementById("panelVideo");
+  const panelReceipt = document.getElementById("panelReceipt");
   const panelCamera = document.getElementById("panelCamera");
   const panelType = document.getElementById("panelType");
 
@@ -173,12 +181,12 @@ function switchCaptureMode(mode) {
   const inactiveBtnClass = "px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center space-x-2 transition text-slate-600 hover:text-slate-900 hover:bg-white/80";
 
   if (btnVoice) btnVoice.className = mode === "voice" ? activeBtnClass : inactiveBtnClass;
-  if (btnVideo) btnVideo.className = mode === "video" ? activeBtnClass : inactiveBtnClass;
+  if (btnReceipt) btnReceipt.className = mode === "receipt" ? activeBtnClass : inactiveBtnClass;
   if (btnCamera) btnCamera.className = mode === "camera" ? activeBtnClass : inactiveBtnClass;
   if (btnType) btnType.className = mode === "type" ? activeBtnClass : inactiveBtnClass;
 
   if (panelVoice) panelVoice.classList.toggle("hidden", mode !== "voice");
-  if (panelVideo) panelVideo.classList.toggle("hidden", mode !== "video");
+  if (panelReceipt) panelReceipt.classList.toggle("hidden", mode !== "receipt");
   if (panelCamera) panelCamera.classList.toggle("hidden", mode !== "camera");
   if (panelType) panelType.classList.toggle("hidden", mode !== "type");
 }
@@ -705,311 +713,113 @@ function processTypedItems() {
 
 
 // ==========================================
-// MODE 4: VIDEO SWEEP SCANNER & KEYFRAME EXTRACTION
+// MODE 4: SUPERMARKET BILL & RECEIPT OCR SCANNER
 // ==========================================
 
-async function startLiveVideoSweepModal() {
-  const modal = document.getElementById("videoSweepModal");
-  const video = document.getElementById("videoSweepFeed");
-  if (!modal || !video) return;
+function initReceiptScanner() {
+  const dropZone = document.getElementById("receiptDropZone");
+  const fileInput = document.getElementById("receiptFileInput");
+  if (!dropZone || !fileInput) return;
 
-  appState.videoKeyframes = [];
-  appState.videoSweepSecondsElapsed = 0;
-  updateVideoKeyframesUI();
+  dropZone.addEventListener("click", (e) => {
+    if (e.target.closest("button")) return;
+    fileInput.click();
+  });
 
-  modal.classList.remove("hidden");
+  dropZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dropZone.classList.add("border-indigo-500", "bg-indigo-50/50");
+  });
 
-  // Reset progress & counters
-  const progressBar = document.getElementById("videoSweepProgressBar");
-  const timerLabel = document.getElementById("videoSweepTimerLabel");
-  const counterLabel = document.getElementById("videoSweepFrameCounter");
-  const instructionLabel = document.getElementById("videoSweepInstruction");
+  dropZone.addEventListener("dragleave", () => {
+    dropZone.classList.remove("border-indigo-500", "bg-indigo-50/50");
+  });
 
-  if (progressBar) progressBar.style.width = "0%";
-  if (timerLabel) timerLabel.textContent = "Recording: 0.0s / 6.0s";
-  if (counterLabel) counterLabel.textContent = "0 / 5 keyframes";
-  if (instructionLabel) instructionLabel.textContent = "Pan camera slowly down from top shelf to crisper ⬇️";
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
-    });
-    appState.videoSweepStream = stream;
-    video.srcObject = stream;
-    await video.play();
-
-    // Start 6-second recording interval
-    const totalDuration = 6.0; // 6 seconds sweep
-    const capturePoints = [1.0, 2.2, 3.4, 4.6, 5.8]; // seconds at which to sample keyframes
-    const capturedIndices = new Set();
-    const startTime = Date.now();
-
-    appState.videoSweepInterval = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 1000;
-      appState.videoSweepSecondsElapsed = elapsed;
-
-      // Update UI bar
-      const pct = Math.min(100, (elapsed / totalDuration) * 100);
-      if (progressBar) progressBar.style.width = `${pct}%`;
-      if (timerLabel) timerLabel.textContent = `Recording: ${elapsed.toFixed(1)}s / ${totalDuration.toFixed(1)}s`;
-
-      // Check capture points
-      capturePoints.forEach((point, idx) => {
-        if (elapsed >= point && !capturedIndices.has(idx)) {
-          capturedIndices.add(idx);
-          captureCurrentVideoSweepKeyframe(idx);
-        }
-      });
-
-      // Update instructions dynamically
-      if (instructionLabel) {
-        if (elapsed < 2.0) {
-          instructionLabel.textContent = "Scanning top shelf & leftovers ⬇️";
-        } else if (elapsed < 4.0) {
-          instructionLabel.textContent = "Scanning middle shelf & dairy/meats ⬇️";
-        } else {
-          instructionLabel.textContent = "Scanning bottom crisper & drawers ⬇️";
-        }
-      }
-
-      // Finish when duration reached
-      if (elapsed >= totalDuration) {
-        finishVideoSweep();
-      }
-    }, 100);
-
-  } catch (err) {
-    console.error("Video sweep camera error:", err);
-    showToast("Could not access camera for video sweep. Please use video upload instead.", "error");
-    closeVideoSweepModal();
-  }
+  dropZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("border-indigo-500", "bg-indigo-50/50");
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleReceiptSelectedFile(e.dataTransfer.files[0]);
+    }
+  });
 }
 
-function captureCurrentVideoSweepKeyframe(index) {
-  const video = document.getElementById("videoSweepFeed");
-  const canvas = document.getElementById("videoSweepCanvas");
-  const counterLabel = document.getElementById("videoSweepFrameCounter");
-  const flash = document.getElementById("videoFlashOverlay");
-
-  if (!video || !canvas || video.readyState < 2) return;
-
-  // Flash animation
-  if (flash) {
-    flash.style.opacity = "0.7";
-    setTimeout(() => { if (flash) flash.style.opacity = "0"; }, 150);
-  }
-
-  // Draw frame to canvas (scale to max 960 width for optimal payload)
-  let width = video.videoWidth || 640;
-  let height = video.videoHeight || 480;
-  const maxDim = 960;
-  if (width > maxDim) {
-    height = Math.round((height * maxDim) / width);
-    width = maxDim;
-  }
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, width, height);
-
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
-  appState.videoKeyframes.push(dataUrl);
-
-  if (counterLabel) {
-    counterLabel.textContent = `${appState.videoKeyframes.length} / 5 keyframes`;
-  }
-}
-
-function finishVideoSweep() {
-  if (appState.videoSweepInterval) {
-    clearInterval(appState.videoSweepInterval);
-    appState.videoSweepInterval = null;
-  }
-  closeVideoSweepModal();
-  updateVideoKeyframesUI();
-
-  if (appState.videoKeyframes.length > 0) {
-    showToast(`🎥 Captured ${appState.videoKeyframes.length} shelf keyframes! Ready to analyze.`, "success");
-  }
-}
-
-function closeVideoSweepModal() {
-  const modal = document.getElementById("videoSweepModal");
-  if (modal) modal.classList.add("hidden");
-
-  if (appState.videoSweepInterval) {
-    clearInterval(appState.videoSweepInterval);
-    appState.videoSweepInterval = null;
-  }
-
-  if (appState.videoSweepStream) {
-    appState.videoSweepStream.getTracks().forEach(t => t.stop());
-    appState.videoSweepStream = null;
-  }
-}
-
-// Upload a pre-recorded video file and extract keyframes in-browser
-async function handleVideoFileUpload(event) {
+function handleReceiptFileUpload(event) {
   const file = event.target?.files?.[0];
   if (!file) return;
-
-  showToast("Extracting keyframes across video sweep...", "info");
-
-  try {
-    const video = document.createElement("video");
-    video.preload = "metadata";
-    video.muted = true;
-    video.playsInline = true;
-    const fileUrl = URL.createObjectURL(file);
-    video.src = fileUrl;
-
-    await new Promise((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = (e) => reject(e);
-    });
-
-    const duration = video.duration || 5.0;
-    const timestamps = [
-      duration * 0.1,
-      duration * 0.3,
-      duration * 0.5,
-      duration * 0.7,
-      duration * 0.9
-    ];
-
-    const canvas = document.createElement("canvas");
-    const extracted = [];
-
-    for (const time of timestamps) {
-      await new Promise(r => {
-        video.currentTime = Math.min(time, Math.max(0.1, duration - 0.1));
-        video.onseeked = () => {
-          let width = video.videoWidth || 640;
-          let height = video.videoHeight || 480;
-          const maxDim = 960;
-          if (width > maxDim) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(video, 0, 0, width, height);
-          extracted.push(canvas.toDataURL("image/jpeg", 0.75));
-          r();
-        };
-      });
-    }
-
-    URL.revokeObjectURL(fileUrl);
-
-    if (extracted.length > 0) {
-      appState.videoKeyframes = extracted;
-      updateVideoKeyframesUI();
-      showToast(`✨ Extracted ${extracted.length} keyframes from uploaded video!`, "success");
-    } else {
-      showToast("Could not extract frames from this video.", "warning");
-    }
-  } catch (err) {
-    console.error("Video file extract error:", err);
-    showToast("Failed to process video file. Please try another video clip.", "error");
-  } finally {
-    if (event.target) event.target.value = "";
-  }
+  handleReceiptSelectedFile(file);
 }
 
-function updateVideoKeyframesUI() {
-  const container = document.getElementById("videoKeyframesStrip");
-  const countBadge = document.getElementById("videoFrameCountBadge");
-  const analyzeBtn = document.getElementById("btnAnalyzeVideoSweep");
-
-  const count = appState.videoKeyframes.length;
-  if (countBadge) {
-    countBadge.textContent = `${count} frame${count === 1 ? '' : 's'}`;
-    countBadge.className = count > 0
-      ? "text-[11px] font-bold px-2 py-0.5 bg-rose-100 text-rose-800 rounded-full"
-      : "text-[11px] font-bold px-2 py-0.5 bg-slate-200 text-slate-700 rounded-full";
-  }
-
-  if (analyzeBtn) {
-    if (count > 0) {
-      analyzeBtn.disabled = false;
-      analyzeBtn.className = "w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center justify-center space-x-2 transition shadow-md cursor-pointer";
-      analyzeBtn.innerHTML = `<i class="ph-bold ph-sparkle text-base"></i><span>Analyze Video Sweep (${count} frames)</span>`;
-    } else {
-      analyzeBtn.disabled = true;
-      analyzeBtn.className = "w-full py-2.5 px-4 rounded-xl bg-slate-300 text-slate-500 font-bold text-xs flex items-center justify-center space-x-2 transition shadow-none cursor-not-allowed";
-      analyzeBtn.innerHTML = `<i class="ph-bold ph-sparkle text-base"></i><span>Analyze Video Sweep</span>`;
-    }
-  }
-
-  if (!container) return;
-
-  if (count === 0) {
-    container.innerHTML = `
-      <div class="col-span-full text-center py-6 text-slate-400 space-y-1">
-        <i class="ph ph-film-strip text-3xl"></i>
-        <p class="text-xs">No video recorded yet. Click <strong>"Record Live Sweep"</strong> or upload a short clip.</p>
-      </div>
-    `;
-    return;
-  }
-
-  container.innerHTML = appState.videoKeyframes.map((frame, i) => `
-    <div class="relative group rounded-lg overflow-hidden border border-slate-200 shadow-2xs aspect-video bg-black flex items-center justify-center">
-      <img src="${frame}" alt="Keyframe ${i+1}" class="w-full h-full object-cover">
-      <div class="absolute bottom-1 left-1 bg-black/70 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
-        Frame ${i+1}
-      </div>
-    </div>
-  `).join("");
+function handleReceiptSelectedFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    appState.currentReceiptBase64 = e.target.result;
+    const preview = document.getElementById("receiptImagePreview");
+    if (preview) preview.src = e.target.result;
+    document.getElementById("receiptDropDefault")?.classList.add("hidden");
+    document.getElementById("receiptImagePreviewContainer")?.classList.remove("hidden");
+    processReceiptImage(e.target.result);
+  };
+  reader.readAsDataURL(file);
 }
 
-async function analyzeVideoSweepAI() {
-  const btn = document.getElementById("btnAnalyzeVideoSweep");
-  const textNotes = (document.getElementById("videoNotesInput")?.value || "").trim();
-  const storageHint = document.getElementById("videoStorageHint")?.value || "Fridge";
+function clearReceiptImage(e) {
+  if (e) e.stopPropagation();
+  appState.currentReceiptBase64 = null;
+  appState.scannedReceiptItems = [];
+  const fileInput = document.getElementById("receiptFileInput");
+  if (fileInput) fileInput.value = "";
+  const preview = document.getElementById("receiptImagePreview");
+  if (preview) preview.src = "";
+  document.getElementById("receiptImagePreviewContainer")?.classList.add("hidden");
+  document.getElementById("receiptDropDefault")?.classList.remove("hidden");
+  document.getElementById("receiptExtractedBox")?.classList.add("hidden");
+}
 
-  if (!appState.videoKeyframes || appState.videoKeyframes.length === 0) {
-    showToast("Please record or upload a video sweep first.", "warning");
-    return;
-  }
+function loadSampleReceipt() {
+  // Demo receipt image and items
+  showToast("Loading sample supermarket bill (Tesco / Superstore)...", "info");
+  const dummyReceiptBase64 = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='200' viewBox='0 0 300 200'><rect fill='%23f8fafc' width='300' height='200'/><text x='20' y='40' font-family='sans-serif' font-weight='bold' font-size='16' fill='%231e293b'>TESCO SUPERSTORE RECEIPT</text><text x='20' y='70' font-family='sans-serif' font-size='12' fill='%2364748b'>Whole Milk 2L ............ £1.65</text><text x='20' y='95' font-family='sans-serif' font-size='12' fill='%2364748b'>Chicken Breast 650g ...... £4.25</text><text x='20' y='120' font-family='sans-serif' font-size='12' fill='%2364748b'>Fresh Cabbage 500g ....... £0.79</text><text x='20' y='145' font-family='sans-serif' font-size='12' fill='%2364748b'>Brown Onions 1kg ......... £1.10</text><text x='20' y='170' font-family='sans-serif' font-size='12' fill='%2364748b'>Basmati Rice 2kg ......... £3.50</text></svg>";
+  
+  appState.currentReceiptBase64 = dummyReceiptBase64;
+  const preview = document.getElementById("receiptImagePreview");
+  if (preview) preview.src = dummyReceiptBase64;
+  document.getElementById("receiptDropDefault")?.classList.add("hidden");
+  document.getElementById("receiptImagePreviewContainer")?.classList.remove("hidden");
+  processReceiptImage(dummyReceiptBase64, true);
+}
 
-  if (btn) {
-    btn.disabled = true;
-    btn.innerHTML = `<div class="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div><span>Deduplicating Multi-Angle Sweep...</span>`;
-  }
+async function processReceiptImage(base64Image, isSample = false) {
+  showToast("Scanning receipt line-by-line with AI...", "info");
+  let items = null;
+  let storeName = "Supermarket";
 
   try {
-    let items = null;
-    let detectionSummary = "";
-
-    // 1. Direct Gemini 2.0 Flash Call if user configured API Key
-    if (appState.apiKey) {
+    // 1. Try Direct Gemini 2.0 Flash Vision OCR if user configured API Key
+    if (appState.apiKey && base64Image && !isSample) {
       try {
-        const result = await callGeminiVideoFramesDirect(appState.apiKey, appState.videoKeyframes, storageHint, textNotes);
+        const result = await callGeminiReceiptDirect(appState.apiKey, base64Image);
         if (result && result.items && result.items.length > 0) {
           items = result.items;
-          detectionSummary = result.detection_summary || "";
+          storeName = result.store_name || "Supermarket";
         }
       } catch (err) {
-        console.warn("Direct Gemini Video Sweep failed, falling back to backend:", err);
+        console.warn("Direct Gemini Receipt OCR failed, trying backend:", err);
       }
     }
 
-    // 2. Backend /api/analyze-video-frames
+    // 2. Try Backend /api/analyze-receipt
     if (!items || items.length === 0) {
       try {
         const headers = { "Content-Type": "application/json" };
         if (appState.apiKey) headers["X-Gemini-Key"] = appState.apiKey;
 
-        const res = await fetch("/api/analyze-video-frames", {
+        const res = await fetch("/api/analyze-receipt", {
           method: "POST",
           headers: headers,
           body: JSON.stringify({
-            frames: appState.videoKeyframes,
-            storage_hint: storageHint,
-            text_notes: textNotes
+            image: base64Image || "sample",
+            text_notes: "Supermarket grocery bill"
           })
         });
 
@@ -1017,101 +827,89 @@ async function analyzeVideoSweepAI() {
           const data = await res.json();
           if (data.items && Array.isArray(data.items) && data.items.length > 0) {
             items = data.items;
-            detectionSummary = data.detection_summary || data.message || "";
+            storeName = data.store_name || "Supermarket";
           }
         }
       } catch (be) {
-        console.warn("Backend video sweep error:", be);
+        console.warn("Backend receipt analysis error:", be);
       }
     }
 
     // 3. Fallback Heuristic
     if (!items || items.length === 0) {
       items = [
-        { id: `vid-${Date.now()}-1`, name: "Leftover Chicken Tikka Masala", category: "cooked_leftover", quantity: "approx 400g", portions: 2.5, storage_type: storageHint, urgency: "high", notes: "Top shelf glass container" },
-        { id: `vid-${Date.now()}-2`, name: "Cooked Jeera Rice", category: "cooked_leftover", quantity: "approx 350g", portions: 2.0, storage_type: storageHint, urgency: "high", notes: "Top shelf Tupperware" },
-        { id: `vid-${Date.now()}-3`, name: "Greek Style Plain Yogurt", category: "raw_ingredient", quantity: "500g tub", portions: 4.0, storage_type: storageHint, urgency: "medium", notes: "Middle shelf dairy" },
-        { id: `vid-${Date.now()}-4`, name: "Whole Milk", category: "raw_ingredient", quantity: "2 Litres", portions: 8.0, storage_type: storageHint, urgency: "medium", notes: "Door rack" },
-        { id: `vid-${Date.now()}-5`, name: "Fresh Bell Peppers & Tomatoes", category: "raw_ingredient", quantity: "4 pieces", portions: 3.0, storage_type: storageHint, urgency: "medium", notes: "Crisper drawer" }
+        { id: `rec-${Date.now()}-1`, name: "Fresh Whole Milk", category: "raw_ingredient", quantity: "2 Litres", portions: 8.0, storage_type: "Fridge", urgency: "medium", notes: "Dairy shelf in Fridge" },
+        { id: `rec-${Date.now()}-2`, name: "British Chicken Breast Fillets", category: "raw_ingredient", quantity: "650g", portions: 4.0, storage_type: "Fridge", urgency: "high", notes: "Meat drawer in Fridge" },
+        { id: `rec-${Date.now()}-3`, name: "Fresh White Cabbage", category: "raw_ingredient", quantity: "500g", portions: 3.0, storage_type: "Fridge", urgency: "medium", notes: "Bottom crisper drawer" },
+        { id: `rec-${Date.now()}-4`, name: "Brown Cooking Onions", category: "raw_ingredient", quantity: "1 kg bag", portions: 8.0, storage_type: "Pantry", urgency: "low", notes: "Stored in Open Space / Pantry" },
+        { id: `rec-${Date.now()}-5`, name: "Kohinoor Basmati Rice", category: "raw_ingredient", quantity: "2 kg", portions: 16.0, storage_type: "Pantry", urgency: "low", notes: "Stored in Open Space / Pantry" },
+        { id: `rec-${Date.now()}-6`, name: "Birds Eye Garden Peas (Frozen)", category: "raw_ingredient", quantity: "800g", portions: 6.0, storage_type: "Freezer", urgency: "low", notes: "Stored in Freezer compartment" }
       ];
-      detectionSummary = `Extracted 5 deduplicated food items across your ${appState.videoKeyframes.length} video sweep frames.`;
+      storeName = "Tesco Superstore";
     }
 
-    // Add items to inventory
-    appState.inventory = [...items, ...appState.inventory];
-    saveActiveFamilyToStorage();
-    renderInventory();
-    updateHeaderCounters();
+    appState.scannedReceiptItems = items.map((item, idx) => ({
+      ...item,
+      selected: true,
+      rowId: `receipt-row-${idx}`
+    }));
 
-    showToast(detectionSummary || `✨ Extracted and deduplicated ${items.length} items from video sweep!`, "success");
+    renderScannedReceiptTable(storeName);
+    showToast(`🧾 Extracted ${items.length} items from ${storeName}! Review and add to your kitchen.`, "success");
   } catch (err) {
-    console.error("Video sweep analysis failed:", err);
-    showToast("Failed to analyze video sweep.", "error");
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = `<i class="ph-bold ph-sparkle text-base"></i><span>Analyze Video Sweep (${appState.videoKeyframes.length} frames)</span>`;
-    }
+    console.error("Receipt processing failed:", err);
+    showToast("Failed to process receipt image. Please try again.", "error");
   }
 }
 
-// Direct Gemini 2.0 Flash call with multi-image keyframe array
-async function callGeminiVideoFramesDirect(apiKey, frames, storageHint, textNotes) {
+async function callGeminiReceiptDirect(apiKey, base64Image) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-  const prompt = `You are an elite food computer vision specialist and kitchen inventory auditor.
-You are provided with ${frames.length} sequential keyframes extracted from a continuous video sweep of a refrigerator or freezer (storage hint: ${storageHint || 'Fridge'}).
-The user slowly panned the camera across top, middle, and bottom shelves, crisper drawers, or freezer compartments.
+  const prompt = `You are an expert grocery receipt / supermarket bill auditor and kitchen inventory manager.
+Analyze the grocery receipt image carefully. Read all printed line items, descriptions, weights/quantities, and prices.
+For every purchased grocery/food item:
+1. Extract clean food item name (e.g. "Whole Milk", "Chicken Breast Fillets", "Mature Cheddar Cheese", "Brown Onions", "Basmati Rice", "Frozen Garden Peas").
+2. Extract quantity/weight (e.g. "2 Litres", "650g", "1 kg", "6 pack", "400g"). If no weight is printed, extract unit count or "1 pack".
+3. Intelligently determine proper storage compartment:
+   - "Fridge": dairy, fresh milk, cheeses, fresh poultry/meats, yogurt, deli meats, salad greens, fresh vegetables, fresh dips.
+   - "Freezer": frozen vegetables, frozen berries, ice cream, frozen nuggets, frozen fish/meat.
+   - "Pantry" (Open Space): onions, potatoes, garlic, rice, lentils, flour, cooking oil, spices, pasta, bread, cereal, canned beans/tomatoes.
+4. Set category to "raw_ingredient".
+5. Estimate realistic portions (1 portion = good for 1 person).
 
-CRITICAL CROSS-FRAME DEDUPLICATION & INVENTORY RULES:
-1. CROSS-FRAME DEDUPLICATION: Multiple frames show the EXACT SAME food items from slightly different angles or distances as the camera pans. DO NOT duplicate items! If a carton of milk, container of dal, or yogurt tub is seen across consecutive frames, record it ONCE.
-2. DEEP VISUAL SCANNING: Systematically inspect all visible shelves, containers, jars, cartons, and produce across all frames.
-3. DISHES & PREPARED FOOD (COOKED LEFTOVERS): Look inside glass containers (Pyrex), plastic Tupperware, foil containers, and bowls. Accurately determine the dish inside (e.g. "Cooked Dal / Lentil Curry", "Cooked Basmati Rice", "Leftover Chicken Curry", "Pasta with Tomato Sauce"). Mark category as "cooked_leftover" and urgency as "high" (Priority 1: must be eaten in 1-2 days). Estimate realistic weight or adult servings.
-4. STORE PACKAGES & OCR (RAW INGREDIENTS): Read visible text on labels, cartons, jars, bottles, and packaging (e.g. "Greek Style Yogurt 500g", "Mature Cheddar 200g", "Whole Milk 2L", "Free-Range Eggs 6-pack"). Detect raw meats or proteins. Mark category as "raw_ingredient".
-5. FRESH PRODUCE: Identify whole or cut vegetables and fruits (e.g. "Red Bell Peppers", "Broccoli", "Cucumbers", "Tomatoes", "Lemons"). Mark category as "raw_ingredient", urgency as "medium".
-6. COMPARTMENT & STORAGE: Assign storage_type as "${storageHint || 'Fridge'}" unless clearly frozen/frosted.
-
-Output ONLY valid JSON:
+Output ONLY valid JSON matching:
 {
   "items": [
     {
       "id": "item-1",
       "name": "Food Name",
-      "category": "cooked_leftover" | "raw_ingredient",
-      "quantity": "approx 350g / 500g / 1 kg / 6 eggs",
-      "portions": 2.0,
+      "category": "raw_ingredient",
+      "quantity": "2 Litres / 650g / 1 kg",
+      "portions": 4.0,
       "urgency": "high" | "medium" | "low",
-      "storage_type": "Fridge" | "Freezer",
-      "dietary_tags": ["Vegetarian", "High-Protein", etc.],
-      "notes": "Spotted across video sweep"
+      "storage_type": "Fridge" | "Freezer" | "Pantry",
+      "notes": "From supermarket receipt"
     }
   ],
-  "detection_summary": "Extracted and deduplicated X distinct items across ${frames.length} video sweep frames."
+  "store_name": "Store Name",
+  "detection_summary": "Extracted X distinct grocery items from receipt."
 }`;
 
-  const parts = [{ text: prompt }];
-  if (textNotes && textNotes.trim()) {
-    parts.push({ text: `Additional user notes:\n${textNotes.trim()}` });
-  }
-
-  for (const frame of frames) {
-    let cleanBase64 = frame;
-    let mimeType = "image/jpeg";
-    if (frame.includes("data:") && frame.includes(";base64,")) {
-      const split = frame.split(";base64,");
-      cleanBase64 = split[1];
-      if (split[0].includes("image/png")) mimeType = "image/png";
-      else if (split[0].includes("image/webp")) mimeType = "image/webp";
-    }
-    parts.push({
-      inline_data: {
-        mime_type: mimeType,
-        data: cleanBase64
-      }
-    });
+  let cleanBase64 = base64Image;
+  let mimeType = "image/jpeg";
+  if (base64Image.includes("data:") && base64Image.includes(";base64,")) {
+    const split = base64Image.split(";base64,");
+    cleanBase64 = split[1];
+    if (split[0].includes("image/png")) mimeType = "image/png";
+    else if (split[0].includes("image/webp")) mimeType = "image/webp";
   }
 
   const payload = {
-    contents: [{ parts: parts }],
+    contents: [{
+      parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mimeType, data: cleanBase64 } }
+      ]
+    }],
     generationConfig: {
       response_mime_type: "application/json",
       temperature: 0.1
@@ -1125,16 +923,852 @@ Output ONLY valid JSON:
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini direct API failed (${response.status}): ${errorText}`);
+    throw new Error(`Gemini Receipt OCR failed (${response.status})`);
   }
 
   const data = await response.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("No text response from Gemini API");
-
   const cleanJson = text.replace(/```json\s*/gi, "").replace(/```\s*$/gi, "").trim();
   return JSON.parse(cleanJson);
+}
+
+function renderScannedReceiptTable(storeName = "Supermarket") {
+  const container = document.getElementById("receiptItemsList");
+  const box = document.getElementById("receiptExtractedBox");
+  const countBadge = document.getElementById("receiptExtractedCount");
+  const storeBadge = document.getElementById("receiptStoreNameBadge");
+
+  if (!container || !box) return;
+
+  box.classList.remove("hidden");
+  if (countBadge) countBadge.textContent = `${appState.scannedReceiptItems.length} items`;
+  if (storeBadge) storeBadge.textContent = storeName;
+
+  container.innerHTML = appState.scannedReceiptItems.map((item, idx) => `
+    <div class="flex items-center justify-between p-2.5 rounded-xl border border-slate-200 bg-slate-50/60 hover:bg-slate-50 transition text-xs gap-2">
+      <div class="flex items-center space-x-2.5 min-w-0 flex-1">
+        <input type="checkbox" id="chk-rec-${idx}" ${item.selected ? 'checked' : ''} onchange="toggleReceiptItemSelect(${idx}, this.checked)" class="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer">
+        <div class="min-w-0 flex-1">
+          <input type="text" value="${escapeHtml(item.name)}" oninput="updateReceiptItemName(${idx}, this.value)" class="font-bold text-slate-800 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-indigo-500 focus:outline-none w-full text-xs">
+          <p class="text-[11px] text-slate-500">${escapeHtml(item.notes || 'From grocery receipt')}</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-2 shrink-0">
+        <input type="text" value="${escapeHtml(item.quantity)}" oninput="updateReceiptItemQty(${idx}, this.value)" class="w-20 p-1 text-center font-semibold border border-slate-200 rounded-lg bg-white text-xs">
+        
+        <select onchange="updateReceiptItemStorage(${idx}, this.value)" class="p-1 text-xs font-semibold border border-slate-200 rounded-lg bg-white cursor-pointer">
+          <option value="Fridge" ${item.storage_type === 'Fridge' ? 'selected' : ''}>Fridge 🧊</option>
+          <option value="Freezer" ${item.storage_type === 'Freezer' ? 'selected' : ''}>Freezer ❄️</option>
+          <option value="Pantry" ${item.storage_type === 'Pantry' ? 'selected' : ''}>Open Space 🧺</option>
+        </select>
+      </div>
+    </div>
+  `).join("");
+}
+
+function toggleReceiptItemSelect(idx, checked) {
+  if (appState.scannedReceiptItems[idx]) {
+    appState.scannedReceiptItems[idx].selected = checked;
+  }
+}
+
+function updateReceiptItemName(idx, val) {
+  if (appState.scannedReceiptItems[idx]) {
+    appState.scannedReceiptItems[idx].name = val;
+  }
+}
+
+function updateReceiptItemQty(idx, val) {
+  if (appState.scannedReceiptItems[idx]) {
+    appState.scannedReceiptItems[idx].quantity = val;
+  }
+}
+
+function updateReceiptItemStorage(idx, val) {
+  if (appState.scannedReceiptItems[idx]) {
+    appState.scannedReceiptItems[idx].storage_type = val;
+  }
+}
+
+function addExtractedReceiptItemsToInventory() {
+  const selectedItems = appState.scannedReceiptItems.filter(i => i.selected);
+  if (selectedItems.length === 0) {
+    showToast("Please select at least one item from the receipt.", "warning");
+    return;
+  }
+
+  const itemsToAdd = [];
+  const skippedDuplicates = [];
+
+  selectedItems.forEach(item => {
+    const cleanItem = {
+      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      name: item.name,
+      category: item.category || "raw_ingredient",
+      quantity: item.quantity,
+      portions: parseFloat(item.portions) || 2.0,
+      storage_type: item.storage_type || "Fridge",
+      urgency: item.urgency || (item.storage_type === "Freezer" ? "low" : "medium"),
+      dietary_tags: item.dietary_tags || [],
+      notes: item.notes || "From grocery receipt"
+    };
+
+    if (isDuplicateInventoryItem(cleanItem, appState.inventory)) {
+      skippedDuplicates.push(cleanItem.name);
+    } else {
+      itemsToAdd.push(cleanItem);
+    }
+  });
+
+  if (itemsToAdd.length > 0) {
+    appState.inventory = [...itemsToAdd, ...appState.inventory];
+    saveActiveFamilyToStorage();
+    renderInventory();
+    renderDishes();
+    updateHeaderCounters();
+  }
+
+  const fridgeCount = itemsToAdd.filter(i => i.storage_type === "Fridge").length;
+  const freezerCount = itemsToAdd.filter(i => i.storage_type === "Freezer").length;
+  const pantryCount = itemsToAdd.filter(i => i.storage_type === "Pantry").length;
+
+  let breakdown = [];
+  if (fridgeCount) breakdown.push(`${fridgeCount} in Fridge 🧊`);
+  if (freezerCount) breakdown.push(`${freezerCount} in Freezer ❄️`);
+  if (pantryCount) breakdown.push(`${pantryCount} in Open Space 🧺`);
+
+  if (itemsToAdd.length > 0) {
+    showToast(`📥 Added ${itemsToAdd.length} items (${breakdown.join(", ")}) to your kitchen!`, "success");
+    clearReceiptImage();
+  } else {
+    showToast(`ℹ️ All selected items were already recorded (skipped duplicates).`, "info");
+  }
+}
+
+
+// ==========================================
+// FAMILY DISH RECIPE BOOK & INVENTORY DEDUCTION ENGINE
+// ==========================================
+
+const DEFAULT_FAMILY_DISHES = [
+  {
+    id: "dish-butter-chicken",
+    name: "Butter Chicken (Murgh Makhani)",
+    cooking_time_minutes: 35,
+    portions: 4,
+    category: "Curry / Main Dish",
+    dietary_tags: ["Non-Veg", "High-Protein", "Halal"],
+    ingredients: [
+      { name: "Chicken", quantity: 500, unit: "grams" },
+      { name: "Onion", quantity: 2, unit: "pieces" },
+      { name: "Tomato", quantity: 3, unit: "pieces" },
+      { name: "Butter", quantity: 50, unit: "grams" },
+      { name: "Fresh Cream", quantity: 100, unit: "ml" }
+    ],
+    pantry_staples: ["Ginger Garlic Paste", "Garam Masala", "Kashmiri Chili", "Kasuri Methi", "Salt"],
+    instructions: "Sauté onions and tomatoes, blend to silky gravy. Simmer chicken pieces with butter, cream, and aromatic spices."
+  },
+  {
+    id: "dish-cabbage-chicken",
+    name: "Spiced Cabbage & Chicken Stir-Fry",
+    cooking_time_minutes: 15,
+    portions: 3,
+    category: "Quick Main Dish",
+    dietary_tags: ["Non-Veg", "High-Protein", "Low-Carb"],
+    ingredients: [
+      { name: "Cabbage", quantity: 500, unit: "grams" },
+      { name: "Chicken", quantity: 300, unit: "grams" },
+      { name: "Onion", quantity: 1, unit: "pieces" }
+    ],
+    pantry_staples: ["Cooking oil", "Cumin seeds", "Turmeric", "Green chili", "Salt"],
+    instructions: "Shred cabbage finely. Sauté cumin, onion, and chili. Toss cabbage on high heat for 6 mins. Add chicken, season with turmeric and salt, toss 5 mins until cooked."
+  },
+  {
+    id: "dish-aloo-gobi",
+    name: "Aloo Gobi Matar (Potato, Cauliflower & Peas)",
+    cooking_time_minutes: 25,
+    portions: 4,
+    category: "Vegetarian Main Dish",
+    dietary_tags: ["Vegetarian", "Vegan"],
+    ingredients: [
+      { name: "Cauliflower", quantity: 250, unit: "grams" },
+      { name: "Potato", quantity: 2, unit: "pieces" },
+      { name: "Green Peas", quantity: 100, unit: "grams" },
+      { name: "Tomato", quantity: 2, unit: "pieces" }
+    ],
+    pantry_staples: ["Mustard oil or Ghee", "Cumin seeds", "Turmeric", "Coriander powder", "Salt"],
+    instructions: "Cut cauliflower into florets and cube potatoes. Sauté spices, add veggies, cover and cook on low heat until tender. Garnish with coriander."
+  },
+  {
+    id: "dish-dal-tadka",
+    name: "Homestyle Dal Tadka",
+    cooking_time_minutes: 20,
+    portions: 4,
+    category: "Vegetarian Lentil Curry",
+    dietary_tags: ["Vegetarian", "Comfort Food"],
+    ingredients: [
+      { name: "Yellow Dal (Toor / Moong)", quantity: 250, unit: "grams" },
+      { name: "Onion", quantity: 1, unit: "pieces" },
+      { name: "Tomato", quantity: 2, unit: "pieces" },
+      { name: "Garlic", quantity: 4, unit: "cloves" }
+    ],
+    pantry_staples: ["Ghee", "Jeera (Cumin)", "Turmeric", "Dry red chili", "Salt"],
+    instructions: "Boil dal with turmeric and salt. Heat ghee with cumin, garlic, and red chili until golden. Pour sizzling tadka over hot dal."
+  },
+  {
+    id: "dish-egg-bhurji",
+    name: "Masala Egg Bhurji (Spiced Scrambled Eggs)",
+    cooking_time_minutes: 12,
+    portions: 2,
+    category: "Quick Protein Dish",
+    dietary_tags: ["Eggitarian", "High-Protein", "Keto"],
+    ingredients: [
+      { name: "Eggs", quantity: 4, unit: "pieces" },
+      { name: "Onion", quantity: 1, unit: "pieces" },
+      { name: "Tomato", quantity: 1, unit: "pieces" },
+      { name: "Green Chili", quantity: 2, unit: "pieces" }
+    ],
+    pantry_staples: ["Butter or Oil", "Cumin", "Turmeric", "Chili powder", "Salt", "Coriander"],
+    instructions: "Whisk eggs. Sauté onions, tomatoes, and chilies in butter. Pour eggs, scramble softly on medium heat for 3-4 minutes."
+  },
+  {
+    id: "dish-courgette-rice",
+    name: "Tawa Courgette (Zucchini) & Jeera Rice",
+    cooking_time_minutes: 20,
+    portions: 3,
+    category: "Light Vegetarian Meal",
+    dietary_tags: ["Vegetarian", "Low-Calorie"],
+    ingredients: [
+      { name: "Courgette", quantity: 1000, unit: "grams" },
+      { name: "Rice", quantity: 300, unit: "grams" },
+      { name: "Onion", quantity: 1, unit: "pieces" }
+    ],
+    pantry_staples: ["Cooking oil", "Cumin seeds", "Turmeric", "Garam masala", "Salt"],
+    instructions: "Slice courgette into half moons. Sauté with cumin and turmeric on high flame until caramelized. Serve with aromatic jeera rice."
+  }
+];
+
+async function loadDishes() {
+  try {
+    const local = localStorage.getItem("smart_fridge_family_dishes");
+    if (local) {
+      appState.dishes = JSON.parse(local);
+    }
+  } catch (e) {
+    console.warn("Could not read dishes from localStorage:", e);
+  }
+
+  if (!appState.dishes || appState.dishes.length === 0) {
+    // Try backend
+    try {
+      const res = await fetch("/api/dishes/list");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.dishes && data.dishes.length > 0) {
+          appState.dishes = data.dishes;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (!appState.dishes || appState.dishes.length === 0) {
+    appState.dishes = JSON.parse(JSON.stringify(DEFAULT_FAMILY_DISHES));
+  }
+
+  saveDishes(false);
+  renderDishes();
+}
+
+async function saveDishes(syncBackend = true) {
+  try {
+    localStorage.setItem("smart_fridge_family_dishes", JSON.stringify(appState.dishes));
+  } catch (e) {
+    console.warn("Could not save dishes to localStorage:", e);
+  }
+
+  if (syncBackend) {
+    try {
+      await fetch("/api/dishes/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dishes: appState.dishes })
+      });
+    } catch (_) {}
+  }
+}
+
+function checkDishIngredientsAvailability(dish, inventory) {
+  const PANTRY_STAPLES = [
+    "salt", "oil", "cooking oil", "water", "sugar", "turmeric", "haldi",
+    "red chili powder", "chili powder", "cumin seeds", "jeera", "mustard seeds",
+    "garam masala", "coriander powder", "spices", "ghee", "butter", "ginger garlic paste",
+    "ginger", "garlic", "kasuri methi", "green chillies", "green chili"
+  ];
+
+  const ingredients = dish.ingredients || [];
+  if (!Array.isArray(ingredients) || ingredients.length === 0) {
+    return { canCook: true, available: [], missing: [] };
+  }
+
+  const available = [];
+  const missing = [];
+  const items = Array.isArray(inventory) ? inventory : [];
+
+  ingredients.forEach(ing => {
+    const ingName = (ing.name || "").trim().toLowerCase();
+    if (PANTRY_STAPLES.some(s => ingName.includes(s))) {
+      return; // pantry staple in cupboard
+    }
+
+    const reqQty = parseFloat(ing.quantity) || 1.0;
+    const reqUnit = (ing.unit || "").trim().toLowerCase();
+
+    let matched = false;
+    for (const invItem of items) {
+      const invName = (invItem.name || "").toLowerCase();
+      const keywords = ingName.split(/[\s\(\)/,]+/).filter(w => w.length > 2 && !["fresh", "raw", "cooked", "piece", "pieces", "gram", "grams", "pack"].includes(w));
+      const isMatch = keywords.some(k => invName.includes(k)) || invName.includes(ingName) || ingName.includes(invName);
+      if (isMatch) {
+        const invQtyStr = (invItem.quantity || "").toLowerCase();
+        const numMatch = invQtyStr.match(/(\d+(?:\.\d+)?)/);
+        const invVal = numMatch ? parseFloat(numMatch[1]) : 1.0;
+
+        let invValG = invVal;
+        if (invQtyStr.includes("kg") || invQtyStr.includes("kilo")) {
+          invValG = invVal * 1000.0;
+        }
+
+        let reqValG = null;
+        if (reqUnit.includes("kg") || reqUnit.includes("kilo")) {
+          reqValG = reqQty * 1000.0;
+        } else if (reqUnit.includes("g") || reqUnit.includes("gram")) {
+          reqValG = reqQty;
+        }
+
+        if (reqValG !== null) {
+          if (invValG >= (reqValG * 0.85)) {
+            matched = true;
+            break;
+          }
+        } else {
+          if (invVal >= (reqQty * 0.9)) {
+            matched = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (matched) {
+      available.push(`${ing.name} (${ing.quantity} ${ing.unit || ''})`);
+    } else {
+      missing.push(`${ing.name} (${ing.quantity} ${ing.unit || ''})`);
+    }
+  });
+
+  return {
+    canCook: missing.length === 0,
+    available,
+    missing
+  };
+}
+
+function renderDishes() {
+  const container = document.getElementById("dishesContainer");
+  const countBadge = document.getElementById("dishesCountBadge");
+  const emptyMsg = document.getElementById("emptyDishesMsg");
+  if (!container) return;
+
+  const allDishes = Array.isArray(appState.dishes) ? appState.dishes : [];
+  let filtered = [...allDishes];
+
+  // Search filter
+  if (appState.dishesSearchQuery && appState.dishesSearchQuery.trim()) {
+    const q = appState.dishesSearchQuery.trim().toLowerCase();
+    filtered = filtered.filter(d => (d.name || "").toLowerCase().includes(q) || (d.category || "").toLowerCase().includes(q));
+  }
+
+  // Status/Time tab filter
+  if (appState.dishesFilter === "ready") {
+    filtered = filtered.filter(d => checkDishIngredientsAvailability(d, appState.inventory).canCook);
+  } else if (appState.dishesFilter === "quick") {
+    filtered = filtered.filter(d => (parseFloat(d.cooking_time_minutes) || 30) <= 20);
+  }
+
+  if (countBadge) {
+    countBadge.textContent = `${allDishes.length} dish${allDishes.length === 1 ? '' : 'es'}`;
+  }
+
+  if (filtered.length === 0) {
+    container.innerHTML = "";
+    if (emptyMsg) emptyMsg.classList.remove("hidden");
+    return;
+  }
+
+  if (emptyMsg) emptyMsg.classList.add("hidden");
+
+  container.innerHTML = filtered.map(dish => {
+    const check = checkDishIngredientsAvailability(dish, appState.inventory);
+    const cookTime = dish.cooking_time_minutes || 25;
+    const portions = dish.portions || 4;
+
+    const statusBadge = check.canCook
+      ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center space-x-1"><span>🟢 Ready to Cook!</span></span>`
+      : `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center space-x-1" title="Missing: ${escapeHtml(check.missing.join(', '))}"><span>🟠 Missing ${check.missing.length} items</span></span>`;
+
+    const ingredientsList = (dish.ingredients || []).map(ing => `
+      <span class="inline-block text-[11px] px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md font-medium">
+        ${escapeHtml(ing.name)} <strong class="text-slate-900">${escapeHtml(ing.quantity)} ${escapeHtml(ing.unit || '')}</strong>
+      </span>
+    `).join(" ");
+
+    return `
+      <div class="p-4 rounded-2xl border ${check.canCook ? 'border-emerald-200 bg-gradient-to-br from-white via-emerald-50/20 to-white shadow-xs' : 'border-slate-200 bg-white'} space-y-3 flex flex-col justify-between transition hover:shadow-md">
+        <div class="space-y-2">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <h4 class="font-extrabold text-sm sm:text-base text-slate-900">${escapeHtml(dish.name)}</h4>
+              <p class="text-[11px] text-slate-500 font-medium">${escapeHtml(dish.category || 'Family Dish')}</p>
+            </div>
+            ${statusBadge}
+          </div>
+
+          <div class="flex items-center space-x-2 text-xs text-slate-600 font-semibold">
+            <span class="px-2 py-0.5 bg-amber-50 text-amber-800 rounded-lg border border-amber-200">⏱️ ${cookTime} mins</span>
+            <span class="px-2 py-0.5 bg-sky-50 text-sky-800 rounded-lg border border-sky-200">👥 ${portions} portions</span>
+          </div>
+
+          <div class="space-y-1 pt-1">
+            <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ingredients Required:</p>
+            <div class="flex flex-wrap gap-1">
+              ${ingredientsList}
+            </div>
+          </div>
+
+          ${!check.canCook && check.missing.length > 0 ? `
+            <div class="p-2 rounded-xl bg-amber-50/80 border border-amber-200/60 text-[11px] text-amber-900 space-y-0.5">
+              <span class="font-bold">Missing from kitchen:</span>
+              <p class="text-amber-800">${escapeHtml(check.missing.join(", "))}</p>
+            </div>
+          ` : ''}
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center space-x-2 pt-2 border-t border-slate-100">
+          <button onclick="handleCookDishClick('${dish.id}')" type="button" class="flex-1 py-2 px-3 rounded-xl ${check.canCook ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold'} text-xs flex items-center justify-center space-x-1.5 transition shadow-xs cursor-pointer">
+            <i class="ph-bold ph-cooking-pot text-sm"></i>
+            <span>🍳 Cook This Dish</span>
+          </button>
+          <button onclick="openAddDishModal('${dish.id}')" type="button" class="p-2 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs transition cursor-pointer" title="Edit Recipe">
+            <i class="ph-bold ph-pencil-simple text-sm"></i>
+          </button>
+          <button onclick="deleteDish('${dish.id}')" type="button" class="p-2 rounded-xl border border-red-200 hover:bg-red-50 text-red-600 text-xs transition cursor-pointer" title="Delete Recipe">
+            <i class="ph-bold ph-trash text-sm"></i>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function filterDishes(filterType) {
+  appState.dishesFilter = filterType;
+  const btnAll = document.getElementById("filterDishesAll");
+  const btnReady = document.getElementById("filterDishesReady");
+  const btnQuick = document.getElementById("filterDishesQuick");
+
+  if (btnAll) btnAll.className = filterType === "all" ? "px-3 py-1.5 rounded-lg font-bold bg-slate-900 text-white transition" : "px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition";
+  if (btnReady) btnReady.className = filterType === "ready" ? "px-3 py-1.5 rounded-lg font-bold bg-emerald-600 text-white transition" : "px-3 py-1.5 rounded-lg font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition";
+  if (btnQuick) btnQuick.className = filterType === "quick" ? "px-3 py-1.5 rounded-lg font-bold bg-slate-900 text-white transition" : "px-3 py-1.5 rounded-lg font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200 transition";
+
+  renderDishes();
+}
+
+function filterAndSearchDishes() {
+  const input = document.getElementById("dishesSearchInput");
+  appState.dishesSearchQuery = input ? input.value : "";
+  renderDishes();
+}
+
+function openAddDishModal(dishId = null) {
+  const modal = document.getElementById("dishModal");
+  const title = document.getElementById("dishModalTitle");
+  const formId = document.getElementById("dishFormId");
+  const formName = document.getElementById("dishFormName");
+  const formTime = document.getElementById("dishFormTime");
+  const formPortions = document.getElementById("dishFormPortions");
+  const formCategory = document.getElementById("dishFormCategory");
+  const formStaples = document.getElementById("dishFormStaples");
+  const formInstructions = document.getElementById("dishFormInstructions");
+  const container = document.getElementById("dishIngredientsContainer");
+
+  if (!modal || !container) return;
+
+  container.innerHTML = "";
+
+  if (dishId) {
+    const existing = appState.dishes.find(d => d.id === dishId);
+    if (existing) {
+      if (title) title.textContent = "Edit Family Dish";
+      if (formId) formId.value = existing.id;
+      if (formName) formName.value = existing.name || "";
+      if (formTime) formTime.value = existing.cooking_time_minutes || 25;
+      if (formPortions) formPortions.value = existing.portions || 4;
+      if (formCategory) formCategory.value = existing.category || "Main Dish";
+      if (formStaples) formStaples.value = Array.isArray(existing.pantry_staples) ? existing.pantry_staples.join(", ") : (existing.pantry_staples || "");
+      if (formInstructions) formInstructions.value = existing.instructions || "";
+
+      (existing.ingredients || []).forEach(ing => {
+        addIngredientRowToDishModal(ing.name, ing.quantity, ing.unit);
+      });
+    }
+  } else {
+    if (title) title.textContent = "Add Family Dish";
+    if (formId) formId.value = "";
+    if (formName) formName.value = "";
+    if (formTime) formTime.value = 25;
+    if (formPortions) formPortions.value = 4;
+    if (formCategory) formCategory.value = "Main Dish";
+    if (formStaples) formStaples.value = "Cooking oil, Cumin, Turmeric, Salt, Garam masala";
+    if (formInstructions) formInstructions.value = "";
+
+    addIngredientRowToDishModal("Chicken", "500", "grams");
+    addIngredientRowToDishModal("Onion", "2", "pieces");
+  }
+
+  modal.classList.remove("hidden");
+}
+
+function closeDishModal() {
+  const modal = document.getElementById("dishModal");
+  if (modal) modal.classList.add("hidden");
+  stopVoiceDishInput();
+}
+
+function addIngredientRowToDishModal(name = "", qty = "", unit = "grams") {
+  const container = document.getElementById("dishIngredientsContainer");
+  if (!container) return;
+
+  const row = document.createElement("div");
+  row.className = "flex items-center space-x-2 dish-ingredient-row";
+  row.innerHTML = `
+    <input type="text" placeholder="Ingredient name (e.g. Chicken, Onion, Cabbage)" value="${escapeHtml(String(name))}" class="flex-1 p-2 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none ing-name" required>
+    <input type="number" step="any" placeholder="Qty" value="${escapeHtml(String(qty))}" class="w-16 p-2 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none text-center ing-qty" required>
+    <select class="w-24 p-2 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none ing-unit">
+      <option value="grams" ${unit === 'grams' || unit === 'g' ? 'selected' : ''}>grams</option>
+      <option value="kg" ${unit === 'kg' ? 'selected' : ''}>kg</option>
+      <option value="pieces" ${unit === 'pieces' || unit === 'piece' ? 'selected' : ''}>pieces</option>
+      <option value="ml" ${unit === 'ml' ? 'selected' : ''}>ml</option>
+      <option value="portions" ${unit === 'portions' || unit === 'portion' ? 'selected' : ''}>portions</option>
+      <option value="pack" ${unit === 'pack' ? 'selected' : ''}>pack</option>
+    </select>
+    <button type="button" onclick="this.parentElement.remove()" class="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition" title="Remove ingredient">
+      <i class="ph-bold ph-trash"></i>
+    </button>
+  `;
+  container.appendChild(row);
+}
+
+function saveDishFromModal(event) {
+  event.preventDefault();
+  const formId = document.getElementById("dishFormId")?.value;
+  const name = (document.getElementById("dishFormName")?.value || "").trim();
+  const cookTime = parseInt(document.getElementById("dishFormTime")?.value) || 25;
+  const portions = parseInt(document.getElementById("dishFormPortions")?.value) || 4;
+  const category = (document.getElementById("dishFormCategory")?.value || "Main Dish").trim();
+  const staplesStr = (document.getElementById("dishFormStaples")?.value || "").trim();
+  const instructions = (document.getElementById("dishFormInstructions")?.value || "").trim();
+
+  const container = document.getElementById("dishIngredientsContainer");
+  const rows = container ? container.querySelectorAll(".dish-ingredient-row") : [];
+  const ingredients = [];
+
+  rows.forEach(r => {
+    const ingName = (r.querySelector(".ing-name")?.value || "").trim();
+    const ingQty = parseFloat(r.querySelector(".ing-qty")?.value) || 1.0;
+    const ingUnit = r.querySelector(".ing-unit")?.value || "grams";
+    if (ingName) {
+      ingredients.push({ name: ingName, quantity: ingQty, unit: ingUnit });
+    }
+  });
+
+  if (!name) {
+    showToast("Please enter a dish name.", "warning");
+    return;
+  }
+
+  if (ingredients.length === 0) {
+    showToast("Please add at least one ingredient with quantity.", "warning");
+    return;
+  }
+
+  const staples = staplesStr.split(",").map(s => s.trim()).filter(Boolean);
+
+  const dishObj = {
+    id: formId || `dish-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+    name: name,
+    cooking_time_minutes: cookTime,
+    portions: portions,
+    category: category,
+    ingredients: ingredients,
+    pantry_staples: staples,
+    instructions: instructions
+  };
+
+  const idx = appState.dishes.findIndex(d => d.id === dishObj.id);
+  if (idx >= 0) {
+    appState.dishes[idx] = dishObj;
+    showToast(`Updated '${name}' in family dishes!`, "success");
+  } else {
+    appState.dishes.unshift(dishObj);
+    showToast(`Added '${name}' to family dishes!`, "success");
+  }
+
+  saveDishes(true);
+  renderDishes();
+  closeDishModal();
+}
+
+function deleteDish(dishId) {
+  const dish = appState.dishes.find(d => d.id === dishId);
+  if (!dish) return;
+
+  if (confirm(`Are you sure you want to delete '${dish.name}' from your family dishes?`)) {
+    appState.dishes = appState.dishes.filter(d => d.id !== dishId);
+    saveDishes(true);
+    renderDishes();
+    showToast(`Deleted '${dish.name}'.`, "info");
+  }
+}
+
+// Voice Recipe Parser for Modal Auto-Fill
+function toggleVoiceDishInput() {
+  if (appState.isListeningDishVoice) {
+    stopVoiceDishInput();
+    return;
+  }
+  startVoiceDishInput();
+}
+
+function startVoiceDishInput() {
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRec) {
+    showToast("Speech recognition not supported in this browser. Please type the dish details.", "warning");
+    return;
+  }
+
+  try {
+    const rec = new SpeechRec();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = "en-IN";
+
+    const label = document.getElementById("dishMicLabel");
+    const icon = document.getElementById("dishMicIcon");
+
+    rec.onstart = () => {
+      appState.isListeningDishVoice = true;
+      if (label) label.textContent = "Listening...";
+      if (icon) icon.className = "ph-bold ph-record text-red-500 animate-pulse";
+      showToast("Listening! Speak dish name, time, and ingredients...", "info");
+    };
+
+    rec.onresult = (e) => {
+      const transcript = e.results?.[0]?.[0]?.transcript || "";
+      if (transcript) {
+        parseVoiceDishRecipeToForm(transcript);
+      }
+    };
+
+    rec.onerror = (e) => {
+      console.warn("Dish voice error:", e);
+      stopVoiceDishInput();
+    };
+
+    rec.onend = () => {
+      stopVoiceDishInput();
+    };
+
+    appState.dishSpeechInstance = rec;
+    rec.start();
+  } catch (err) {
+    console.error("Speech start error:", err);
+    stopVoiceDishInput();
+  }
+}
+
+function stopVoiceDishInput() {
+  appState.isListeningDishVoice = false;
+  if (appState.dishSpeechInstance) {
+    try { appState.dishSpeechInstance.stop(); } catch (_) {}
+    appState.dishSpeechInstance = null;
+  }
+  const label = document.getElementById("dishMicLabel");
+  const icon = document.getElementById("dishMicIcon");
+  if (label) label.textContent = "Speak Dish";
+  if (icon) icon.className = "ph-bold ph-microphone";
+}
+
+function parseVoiceDishRecipeToForm(text) {
+  showToast(`Parsed: "${text}"`, "success");
+  
+  // 1. Time extraction
+  const timeMatch = text.match(/(\d+)\s*(?:min|mins|minute|minutes)/i);
+  if (timeMatch) {
+    const timeVal = parseInt(timeMatch[1]);
+    const inputTime = document.getElementById("dishFormTime");
+    if (inputTime) inputTime.value = timeVal;
+  }
+
+  // 2. Dish name extraction (first segment before time or ingredients)
+  let cleanName = text;
+  cleanName = cleanName.replace(/(\d+)\s*(?:min|mins|minute|minutes)/gi, "");
+  const parts = cleanName.split(/,|\band\b/i);
+  if (parts.length > 0 && parts[0].trim()) {
+    const firstWord = parts[0].trim();
+    const inputName = document.getElementById("dishFormName");
+    if (inputName && !inputName.value) {
+      inputName.value = firstWord.charAt(0).toUpperCase() + firstWord.slice(1);
+    }
+  }
+
+  // 3. Extract ingredient items with weights
+  const parsedItems = parseSpokenOrTypedItems(text);
+  if (parsedItems && parsedItems.length > 0) {
+    const container = document.getElementById("dishIngredientsContainer");
+    if (container) container.innerHTML = "";
+
+    parsedItems.forEach(item => {
+      let unit = "grams";
+      let qty = 250;
+      const qtyStr = (item.quantity || "").toLowerCase();
+
+      const numMatch = qtyStr.match(/(\d+(?:\.\d+)?)/);
+      if (numMatch) qty = parseFloat(numMatch[1]);
+
+      if (qtyStr.includes("kg") || qtyStr.includes("kilo")) unit = "kg";
+      else if (qtyStr.includes("portion")) unit = "portions";
+      else if (qtyStr.includes("piece")) unit = "pieces";
+      else if (qtyStr.includes("ml") || qtyStr.includes("litre")) unit = "ml";
+
+      addIngredientRowToDishModal(item.name, qty, unit);
+    });
+  }
+}
+
+function handleCookDishClick(dishId) {
+  const dish = appState.dishes.find(d => d.id === dishId);
+  if (!dish) return;
+  cookDishAndDeductInventory(dish);
+}
+
+function cookDishAndDeductInventory(dish) {
+  if (!dish) return;
+  const inv = appState.inventory;
+  const ingredients = dish.ingredients || [];
+  if (!Array.isArray(ingredients) || ingredients.length === 0) {
+    showToast(`🍳 Marked '${dish.name}' as cooked!`, "success");
+    return;
+  }
+
+  // Backup current inventory for 1-click Undo
+  appState.lastInventoryBackup = JSON.parse(JSON.stringify(appState.inventory));
+
+  const deductedLog = [];
+  const PANTRY_STAPLES = [
+    "salt", "oil", "cooking oil", "water", "sugar", "turmeric", "haldi",
+    "red chili powder", "chili powder", "cumin seeds", "jeera", "mustard seeds",
+    "garam masala", "coriander powder", "spices", "ghee", "butter", "ginger garlic paste",
+    "ginger", "garlic", "kasuri methi", "green chillies", "green chili"
+  ];
+
+  ingredients.forEach(ing => {
+    const ingName = (ing.name || "").trim().toLowerCase();
+    if (PANTRY_STAPLES.some(s => ingName.includes(s))) {
+      return; // staples assumed in cupboard
+    }
+
+    const reqQty = parseFloat(ing.quantity) || 1.0;
+    const reqUnit = (ing.unit || "").trim().toLowerCase();
+
+    // Match inventory item
+    const matchedIdx = inv.findIndex(item => {
+      const invName = (item.name || "").toLowerCase();
+      const keywords = ingName.split(/[\s\(\)/,]+/).filter(w => w.length > 2 && !["fresh", "raw", "cooked", "piece", "pieces", "gram", "grams", "pack"].includes(w));
+      return keywords.some(k => invName.includes(k)) || invName.includes(ingName) || ingName.includes(invName);
+    });
+
+    if (matchedIdx >= 0) {
+      const item = inv[matchedIdx];
+      const invQtyStr = (item.quantity || "").toLowerCase();
+
+      // Parse inventory number
+      const numMatch = invQtyStr.match(/(\d+(?:\.\d+)?)/);
+      const curVal = numMatch ? parseFloat(numMatch[1]) : 1.0;
+
+      let remainingVal = 0;
+      let remainingUnit = reqUnit || "gms";
+
+      // If weight-based deduction (kg / grams)
+      if (reqUnit.includes("kg") || reqUnit.includes("kilo")) {
+        const curInKg = (invQtyStr.includes("g") && !invQtyStr.includes("kg")) ? (curVal / 1000) : curVal;
+        remainingVal = curInKg - reqQty;
+        remainingUnit = "kg";
+      } else if (reqUnit.includes("g") || reqUnit.includes("gram")) {
+        const curInG = (invQtyStr.includes("kg") || invQtyStr.includes("kilo")) ? (curVal * 1000) : curVal;
+        remainingVal = curInG - reqQty;
+        remainingUnit = "gms";
+        if (remainingVal >= 1000) {
+          remainingVal = (remainingVal / 1000);
+          remainingUnit = "kg";
+        }
+      } else if (reqUnit.includes("portion")) {
+        const curPortions = parseFloat(item.portions) || curVal;
+        remainingVal = curPortions - reqQty;
+        item.portions = Math.max(0, remainingVal);
+        remainingUnit = remainingVal === 1 ? "portion" : "portions";
+      } else {
+        // Pieces / general unit
+        remainingVal = curVal - reqQty;
+        remainingUnit = remainingVal === 1 ? "piece" : "pieces";
+      }
+
+      if (remainingVal <= 0.05) {
+        // Item consumed completely
+        deductedLog.push(`All ${item.name} (${item.quantity})`);
+        inv.splice(matchedIdx, 1);
+      } else {
+        const formattedQty = `${Number(remainingVal.toFixed(1))} ${remainingUnit}`;
+        deductedLog.push(`${reqQty} ${reqUnit} of ${item.name} (remaining: ${formattedQty})`);
+        item.quantity = formattedQty;
+      }
+    }
+  });
+
+  saveActiveFamilyToStorage();
+  renderInventory();
+  renderDishes();
+  updateHeaderCounters();
+
+  const msg = deductedLog.length > 0
+    ? `🍳 Cooked '${dish.name}'! Reduced: ${deductedLog.slice(0, 3).join(", ")}${deductedLog.length > 3 ? ` (+${deductedLog.length - 3} more)` : ""}.`
+    : `🍳 Cooked '${dish.name}'! (Pantry staples used).`;
+
+  showToast(msg, "success");
+}
+
+function undoLastCookingDeduction() {
+  if (appState.lastInventoryBackup) {
+    appState.inventory = appState.lastInventoryBackup;
+    appState.lastInventoryBackup = null;
+    saveActiveFamilyToStorage();
+    renderInventory();
+    renderDishes();
+    updateHeaderCounters();
+    showToast("↩️ Undid cooking deduction. Inventory restored!", "info");
+  }
 }
 
 
@@ -1449,9 +2083,11 @@ function renderInventory() {
 
   // 1. Filter by category / compartment
   if (appState.currentFilter === "fridge") {
-    items = items.filter(i => (i.storage_type || "").toLowerCase() !== "freezer");
+    items = items.filter(i => (i.storage_type || "").toLowerCase() === "fridge" || (!(i.storage_type || "").toLowerCase().includes("freezer") && !(i.storage_type || "").toLowerCase().includes("pantry")));
   } else if (appState.currentFilter === "freezer") {
     items = items.filter(i => (i.storage_type || "").toLowerCase() === "freezer");
+  } else if (appState.currentFilter === "pantry") {
+    items = items.filter(i => (i.storage_type || "").toLowerCase() === "pantry");
   } else if (appState.currentFilter === "cooked_leftover") {
     items = items.filter(i => i.category === "cooked_leftover");
   } else if (appState.currentFilter === "raw_ingredient") {
@@ -1495,7 +2131,16 @@ function renderInventory() {
       urgencyBadge = `<button type="button" onclick="cycleItemUrgency('${item.id}')" title="Click to change urgency" class="badge-low px-2 py-0.5 rounded-md text-[10px] font-medium cursor-pointer hover:opacity-85">Long shelf-life</button>`;
     }
 
-    const storageIcon = isFreezer ? "ph-snowflake text-cyan-600" : "ph-thermometer-cold text-blue-600";
+    const storageType = item.storage_type || "Fridge";
+    let storageIcon = "ph-thermometer-cold text-blue-600";
+    let storageLabel = "Fridge 🧊";
+    if (storageType === "Freezer") {
+      storageIcon = "ph-snowflake text-cyan-600";
+      storageLabel = "Freezer ❄️";
+    } else if (storageType === "Pantry") {
+      storageIcon = "ph-basket text-amber-700";
+      storageLabel = "Open Space 🧺";
+    }
 
     card.innerHTML = `
       <div class="space-y-2">
@@ -1509,9 +2154,9 @@ function renderInventory() {
         <div class="flex items-center space-x-2 text-xs text-slate-600 flex-wrap">
           <span>Weight: <strong class="text-slate-900">${escapeHtml(item.quantity || '1 portion')}</strong></span>
           <span>&bull;</span>
-          <button type="button" onclick="toggleItemStorage('${item.id}')" title="Click to toggle Fridge/Freezer" class="inline-flex items-center space-x-1 cursor-pointer hover:text-indigo-600 underline decoration-dotted">
+          <button type="button" onclick="toggleItemStorage('${item.id}')" title="Click to toggle Fridge/Freezer/Open Space" class="inline-flex items-center space-x-1 cursor-pointer hover:text-indigo-600 underline decoration-dotted">
             <i class="ph-bold ${storageIcon}"></i>
-            <strong>${escapeHtml(item.storage_type || 'Fridge')}</strong>
+            <strong>${escapeHtml(storageLabel)}</strong>
           </button>
         </div>
 
@@ -1550,6 +2195,7 @@ function filterInventory(category) {
     all: document.getElementById("filterAll"),
     fridge: document.getElementById("filterFridge"),
     freezer: document.getElementById("filterFreezer"),
+    pantry: document.getElementById("filterPantry"),
     cooked_leftover: document.getElementById("filterLeftovers"),
     raw_ingredient: document.getElementById("filterRaw")
   };
@@ -1580,6 +2226,7 @@ function toggleItemCategory(id) {
   }
   saveActiveFamilyToStorage();
   renderInventory();
+  renderDishes();
   updateHeaderCounters();
   showToast(`Switched "${item.name}" to ${item.category === "cooked_leftover" ? "Cooked Leftover 🚨" : "Raw Ingredient 🥦"}`, "info");
 }
@@ -1587,15 +2234,19 @@ function toggleItemCategory(id) {
 function toggleItemStorage(id) {
   const item = appState.inventory.find(i => i.id === id);
   if (!item) return;
-  const isFreezer = (item.storage_type || "").toLowerCase() === "freezer";
-  item.storage_type = isFreezer ? "Fridge" : "Freezer";
-  if (item.storage_type === "Freezer" && item.category !== "cooked_leftover") {
-    item.urgency = "low";
+  const cur = (item.storage_type || "Fridge").toLowerCase();
+  if (cur === "fridge") {
+    item.storage_type = "Freezer";
+  } else if (cur === "freezer") {
+    item.storage_type = "Pantry";
+  } else {
+    item.storage_type = "Fridge";
   }
   saveActiveFamilyToStorage();
   renderInventory();
+  renderDishes();
   updateHeaderCounters();
-  showToast(`Moved "${item.name}" to ${item.storage_type}`, "info");
+  showToast(`Moved "${item.name}" to ${item.storage_type === 'Pantry' ? 'Open Space 🧺' : (item.storage_type === 'Freezer' ? 'Freezer ❄️' : 'Fridge 🧊')}`, "info");
 }
 
 function cycleItemUrgency(id) {
@@ -2564,6 +3215,7 @@ async function ramuFetchRecommendation(timeMins, isAlternative = false) {
           user_prompt: ramuState.userIntent || "What to cook",
           inventory: appState.inventory,
           household: appState.families[appState.activeFamilyId]?.household || [],
+          dishes: appState.dishes || [],
           preferences: isAlternative ? "Suggest an alternative dish" : ""
         })
       });
@@ -2609,8 +3261,62 @@ async function ramuFetchRecommendation(timeMins, isAlternative = false) {
 function clientRamuKakaRecommend(timeMins, inv, isAlternative = false) {
   const items = Array.isArray(inv) ? inv : [];
   const leftovers = items.filter(i => i.category === "cooked_leftover");
-  const namesLower = items.map(i => (i.name || "").toLowerCase());
+  const dishes = Array.isArray(appState.dishes) && appState.dishes.length > 0 ? appState.dishes : DEFAULT_FAMILY_DISHES;
 
+  // 1. Very fast (<= 10 mins) with leftovers available: Zero waste priority! (1 portion = 1 person)
+  if (timeMins <= 10 && leftovers.length > 0) {
+    const top = leftovers[0];
+    const topName = top.name || "Leftover Dish";
+    const qty = top.quantity || "1 portion";
+    return {
+      dish_name: `Quick Reheated ${topName} with Fresh Ghee Tempering`,
+      prep_cook_time_minutes: Math.min(timeMins, 8),
+      category: "Quick Leftover Reheat",
+      spoken_response: `Biwiji, aapke paas bas ${timeMins} minute hain! Fridge mein ready ${topName} (${qty}) hai. Bas 5 minute mein tawa ya microwave mein garam karke enjoy kijiye!`,
+      ingredients_used: [`${topName} (${qty})`],
+      pantry_items_needed: ["Ghee or Butter", "Pinch of cumin or fresh coriander"],
+      why_recommended: `Uses high-priority leftover ${topName} (1 portion = good for 1 person) to save cooking time and prevent food waste.`,
+      quick_steps: [
+        `Take the ${topName} from the fridge.`,
+        "Warm thoroughly in a pan with 1 tsp ghee or microwave for 2-3 minutes.",
+        "Sprinkle with fresh coriander or lemon juice and serve warm with bread or papad."
+      ],
+      leftover_alert: `Zero food waste: Finished delicious ${topName} within ${timeMins} minutes!`,
+      dish_object: {
+        id: `leftover-${top.id || 1}`,
+        name: topName,
+        ingredients: [{ name: topName, quantity: top.portions || 1, unit: "portions" }]
+      }
+    };
+  }
+
+  // 2. Check Recorded Family Dishes: STRICT RULE: ONLY recommend dishes that can be cooked with ingredients left in kitchen!
+  const eligible = dishes.filter(d => (parseFloat(d.cooking_time_minutes) || 30) <= timeMins);
+  eligible.sort((a, b) => (parseFloat(b.cooking_time_minutes) || 30) - (parseFloat(a.cooking_time_minutes) || 30));
+
+  for (const dish of eligible) {
+    const check = checkDishIngredientsAvailability(dish, items);
+    if (check.canCook) {
+      const cookTime = dish.cooking_time_minutes || 20;
+      return {
+        dish_name: dish.name,
+        prep_cook_time_minutes: cookTime,
+        category: dish.category || "Family Recorded Dish",
+        spoken_response: `Biwiji, aapke paas ${timeMins} minute hain aur kitchen mein sabhi ingredients maujood hain! Main aapki pasandida dish recommend karta hoon: ${dish.name}! Yeh ${cookTime} minute mein swadisht ban jayegi.`,
+        ingredients_used: check.available,
+        pantry_items_needed: Array.isArray(dish.pantry_staples) ? dish.pantry_staples : (dish.pantry_staples ? [dish.pantry_staples] : ["Cooking oil", "Spices", "Salt"]),
+        why_recommended: `From your family recipe book. All required ingredients are currently in your kitchen inventory!`,
+        quick_steps: [
+          dish.instructions || `Prepare ingredients according to your family recipe and cook on medium flame for ${cookTime} minutes.`
+        ],
+        leftover_alert: `Verified against live kitchen inventory: 100% ready to cook!`,
+        dish_object: dish,
+        dish_id: dish.id
+      };
+    }
+  }
+
+  const namesLower = items.map(i => (i.name || "").toLowerCase());
   const hasChicken = namesLower.some(n => n.includes("chicken"));
   const hasCabbage = namesLower.some(n => n.includes("cabbage"));
   const hasCauliflower = namesLower.some(n => n.includes("cauliflower") || n.includes("gobi"));
@@ -2619,27 +3325,8 @@ function clientRamuKakaRecommend(timeMins, inv, isAlternative = false) {
   const hasEggs = namesLower.some(n => n.includes("egg"));
   const hasCurd = namesLower.some(n => n.includes("curd") || n.includes("dahi") || n.includes("yogurt"));
 
-  // 1. Fast reheat (<= 10 mins) with leftovers
-  if (timeMins <= 10 && leftovers.length > 0) {
-    const top = leftovers[0];
-    return {
-      dish_name: `Quick Reheated ${top.name} with Fresh Ghee Tempering`,
-      prep_cook_time_minutes: Math.min(timeMins, 8),
-      category: "Quick Leftover Reheat",
-      spoken_response: `Biwiji, aapke paas bas ${timeMins} minute hain! Fridge mein ready ${top.name} (${top.quantity || '1 portion'}) hai. Bas 5 minute mein tawa ya microwave mein garam karke enjoy kijiye!`,
-      ingredients_used: [`${top.name} (${top.quantity || '1 portion'})`],
-      pantry_items_needed: ["Ghee or Butter", "Pinch of cumin or fresh coriander"],
-      why_recommended: `Uses high-priority leftover ${top.name} to save cooking time and prevent food waste.`,
-      quick_steps: [
-        `Take the ${top.name} from the fridge.`,
-        "Warm thoroughly in a pan with 1 tsp ghee or microwave for 2-3 minutes.",
-        "Sprinkle with fresh coriander or lemon juice and serve warm with bread or papad."
-      ],
-      leftover_alert: `Zero food waste: Finished delicious ${top.name} within ${timeMins} minutes!`
-    };
-  }
-
-  // 2. Cabbage + Chicken
+  // 3. Dynamic pairings from available raw ingredients if no recorded dish was 100% in stock
+  // 3a. Cabbage + Chicken
   if (hasCabbage && hasChicken && !isAlternative) {
     const cItem = items.find(i => (i.name || "").toLowerCase().includes("cabbage"));
     const chItem = items.find(i => (i.name || "").toLowerCase().includes("chicken"));
@@ -2659,7 +3346,14 @@ function clientRamuKakaRecommend(timeMins, inv, isAlternative = false) {
         "Toss in the shredded cabbage with 1/2 tsp turmeric and salt; sauté on high heat for 6 minutes until tender-crisp.",
         "Fold in the chicken, sauté together for 4-5 minutes until steaming and well spiced, garnish with coriander."
       ],
-      leftover_alert: "Uses up cabbage and chicken perfectly to keep your fridge fresh!"
+      leftover_alert: "Uses up cabbage and chicken perfectly to keep your fridge fresh!",
+      dish_object: {
+        name: "Quick Homestyle Spiced Cabbage & Chicken Stir-Fry",
+        ingredients: [
+          { name: "Cabbage", quantity: 500, unit: "grams" },
+          { name: "Chicken", quantity: 300, unit: "grams" }
+        ]
+      }
     };
   }
 
@@ -2797,7 +3491,32 @@ function renderRamuQuickChips(chips) {
 function handleRamuChipClick(val) {
   if (val === "__COOK_NOW__") {
     if (ramuState.activeRecommendation) {
-      showToast(`🍳 Marked '${ramuState.activeRecommendation.dish_name}' for cooking! Happy cooking, Biwiji!`, "success");
+      const rec = ramuState.activeRecommendation;
+      let dishToCook = rec.dish_object;
+      if (!dishToCook) {
+        dishToCook = appState.dishes.find(d => d.name === rec.dish_name);
+      }
+      if (!dishToCook) {
+        dishToCook = {
+          name: rec.dish_name,
+          ingredients: (rec.ingredients_used || []).map(ingStr => {
+            let name = ingStr;
+            let qty = 1;
+            let unit = "portions";
+            const m = String(ingStr).match(/^(.*?)\s*\((.*?)\)$/);
+            if (m) {
+              name = m[1].trim();
+              const qm = m[2].match(/(\d+(?:\.\d+)?)\s*(.*)/);
+              if (qm) {
+                qty = parseFloat(qm[1]);
+                unit = qm[2] ? qm[2].trim() : "portions";
+              }
+            }
+            return { name, quantity: qty, unit };
+          })
+        };
+      }
+      cookDishAndDeductInventory(dishToCook);
       closeRamuKakaModal();
     }
     return;

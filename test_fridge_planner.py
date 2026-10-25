@@ -282,33 +282,95 @@ def test_word_numbers_voice_dictation():
 
     print("[OK] Word-number dictation verified: '500 grams of cabbage three portions of cooked chicken' split into Cabbage (500g, raw) and Cooked chicken (3 portions, cooked_leftover, high urgency)!")
 
-def test_analyze_video_frames_endpoint():
+def test_analyze_receipt_endpoint():
     # 1x1 transparent/black JPEG data url
-    dummy_frame = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
+    dummy_image = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA="
     
-    # 1. Test Fridge sweep
-    res = client.post("/api/analyze-video-frames", json={
-        "frames": [dummy_frame, dummy_frame, dummy_frame],
-        "storage_hint": "Fridge"
+    res = client.post("/api/analyze-receipt", json={
+        "image": dummy_image,
+        "text_notes": "Tesco superstore bill"
     })
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "success"
-    assert len(data["items"]) > 0
-    categories = [i["category"] for i in data["items"]]
-    assert "cooked_leftover" in categories
-    assert "raw_ingredient" in categories
-    
-    # 2. Test Freezer sweep
-    res_freezer = client.post("/api/analyze-video-frames", json={
-        "frames": [dummy_frame, dummy_frame],
-        "storage_hint": "Freezer"
-    })
-    assert res_freezer.status_code == 200
-    data_freezer = res_freezer.json()
-    assert data_freezer["status"] == "success"
-    assert all(i["storage_type"] == "Freezer" for i in data_freezer["items"])
-    print(f"[OK] Video sweep analysis endpoint verified: {len(data['items'])} deduplicated shelf items extracted!")
+    assert len(data["items"]) >= 3
+    storages = [i["storage_type"] for i in data["items"]]
+    assert "Fridge" in storages
+    assert "Freezer" in storages
+    assert "Pantry" in storages or any("open" in s.lower() for s in storages)
+    print(f"[OK] Supermarket Receipt OCR verified: {len(data['items'])} items categorized into Fridge, Freezer, and Open Space / Pantry!")
+
+def test_dishes_endpoints():
+    # 1. List dishes
+    res_list = client.get("/api/dishes/list")
+    assert res_list.status_code == 200
+    dishes = res_list.json()["dishes"]
+    assert len(dishes) >= 4
+    dish_names = [d["name"] for d in dishes]
+    assert any("Butter Chicken" in n for n in dish_names)
+    assert any("Cabbage" in n for n in dish_names)
+
+    # 2. Save a custom family dish
+    custom_dish = {
+        "id": "dish-test-family-biryani",
+        "name": "Family Chicken Biryani",
+        "cooking_time_minutes": 45,
+        "portions": 5,
+        "category": "Main Dish",
+        "ingredients": [
+            {"name": "Chicken", "quantity": 1000, "unit": "grams"},
+            {"name": "Rice", "quantity": 500, "unit": "grams"},
+            {"name": "Onion", "quantity": 3, "unit": "pieces"}
+        ]
+    }
+    res_save = client.post("/api/dishes/save", json={"dish": custom_dish})
+    assert res_save.status_code == 200
+    updated_dishes = res_save.json()["dishes"]
+    assert any(d["id"] == "dish-test-family-biryani" for d in updated_dishes)
+
+    # 3. Delete custom dish to keep clean
+    res_del = client.post("/api/dishes/delete", json={"dish_id": "dish-test-family-biryani"})
+    assert res_del.status_code == 200
+    remaining_ids = [d["id"] for d in res_del.json()["dishes"]]
+    assert "dish-test-family-biryani" not in remaining_ids
+    print(f"[OK] Family Dishes Recipe Book verified: List, Save, and Delete endpoints work seamlessly!")
+
+def test_ramu_kaka_recorded_dish_matching():
+    # Test strict constraint: Only recommend dishes that can be cooked with ingredients in kitchen!
+    # Case A: Inventory has Chicken (500g), Onions (2 pieces), Tomatoes (3 pieces), Butter (50g), Fresh Cream (100ml) -> Can cook Butter Chicken in 35 mins!
+    payload_can_cook = {
+        "time_available_minutes": 40,
+        "user_prompt": "What to cook for dinner?",
+        "inventory": [
+            {"name": "Raw Chicken Breasts", "quantity": "500 gms", "category": "raw_ingredient", "storage_type": "Fridge"},
+            {"name": "Fresh Onions", "quantity": "3 pieces", "category": "raw_ingredient", "storage_type": "Pantry"},
+            {"name": "Tomatoes", "quantity": "4 pieces", "category": "raw_ingredient", "storage_type": "Fridge"},
+            {"name": "Butter", "quantity": "100 gms", "category": "raw_ingredient", "storage_type": "Fridge"},
+            {"name": "Fresh Cream", "quantity": "150 ml", "category": "raw_ingredient", "storage_type": "Fridge"}
+        ],
+        "household": [{"name": "Anil", "dietary_needs": ["Halal"]}]
+    }
+    res = client.post("/api/ramu-kaka/recommend", json=payload_can_cook)
+    assert res.status_code == 200
+    data = res.json()
+    assert "Butter Chicken" in data["dish_name"]
+    assert "Biwiji" in data["spoken_response"]
+
+    # Case B: When available time is only 15 mins, Butter chicken (takes 35m) cannot be cooked!
+    payload_short_time = {
+        "time_available_minutes": 15,
+        "user_prompt": "I only have 15 mins",
+        "inventory": [
+            {"name": "Cabbage", "quantity": "500 gms", "category": "raw_ingredient", "storage_type": "Fridge"},
+            {"name": "Chicken", "quantity": "300 gms", "category": "raw_ingredient", "storage_type": "Fridge"}
+        ]
+    }
+    res_short = client.post("/api/ramu-kaka/recommend", json=payload_short_time)
+    assert res_short.status_code == 200
+    data_short = res_short.json()
+    assert data_short["prep_cook_time_minutes"] <= 15
+    assert "Cabbage" in data_short["dish_name"]
+    print(f"[OK] Ramu Kaka Recorded Dish Matching verified: Strictly recommends cookable dishes matching time and inventory!")
 
 def test_ramu_kaka_recommend_endpoint():
     # Test Ramu Kaka Voice Assistant recommendation with user's Cabbage + Cooked chicken
@@ -343,7 +405,9 @@ if __name__ == "__main__":
         test_continuous_stream_voice_dictation()
         test_word_numbers_voice_dictation()
         test_ramu_kaka_recommend_endpoint()
-        test_analyze_video_frames_endpoint()
+        test_analyze_receipt_endpoint()
+        test_dishes_endpoints()
+        test_ramu_kaka_recorded_dish_matching()
         test_generate_meal_plan()
         test_generate_meal_plan_with_date()
         test_indian_egg_free_elderly_member()

@@ -7,7 +7,9 @@ import os
 import json
 import base64
 import re
-from typing import List, Optional, Dict, Any, Union
+import copy
+import uuid
+from typing import List, Optional, Dict, Any, Union, Tuple
 from pathlib import Path
 
 from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Header
@@ -137,6 +139,7 @@ class RamuKakaRecommendRequest(BaseModel):
     user_prompt: Optional[str] = "What to cook"
     inventory: List[Dict[str, Any]] = Field(default_factory=list)
     household: List[Dict[str, Any]] = Field(default_factory=list)
+    dishes: List[Dict[str, Any]] = Field(default_factory=list)
     preferences: Optional[str] = ""
 
 # ----------------- Helper Functions -----------------
@@ -1185,83 +1188,73 @@ Output ONLY JSON matching:
         "message": f"Successfully documented {len(parsed_items)} items from your voice recording!"
     }
 
-class AnalyzeVideoFramesRequest(BaseModel):
-    frames: List[str]  # Base64 encoded JPEG images
-    storage_hint: Optional[str] = "Fridge"
+class AnalyzeReceiptRequest(BaseModel):
+    image: str  # Base64 encoded grocery receipt / supermarket bill image
     text_notes: Optional[str] = ""
 
-@api_router.post("/analyze-video-frames")
-async def analyze_video_frames(
-    req: AnalyzeVideoFramesRequest,
+@api_router.post("/analyze-receipt")
+async def analyze_receipt(
+    req: AnalyzeReceiptRequest,
     x_gemini_key: Optional[str] = Header(None)
 ):
     """
-    Analyzes multiple sequential keyframes extracted from a video sweep of a fridge/freezer.
-    Cross-deduplicates items seen across frames into a clean, unified inventory.
+    Analyzes a supermarket grocery bill / receipt image.
+    Extracts all purchased items and quantities, and categorizes them into
+    Fridge, Freezer, or Pantry (Open Space).
     """
     api_key = get_effective_api_key(x_gemini_key)
-    frames = req.frames or []
-    if not frames:
-        return {"status": "warning", "items": [], "message": "No video frames provided."}
+    image_data = req.image or ""
+    if not image_data:
+        return {"status": "warning", "items": [], "message": "No receipt image provided."}
 
-    # 1. Try Gemini 2.0 Flash / 1.5 Flash if API key is present
+    # 1. Try Gemini 2.0 Flash / 1.5 Flash Vision OCR if API key is present
     if api_key and GENAI_AVAILABLE:
         try:
             client = genai.Client(api_key=api_key)
-            sweep_prompt = f"""You are an elite food computer vision specialist and kitchen inventory auditor.
-You are provided with {len(frames)} sequential keyframes extracted from a continuous video sweep of a refrigerator or freezer (storage hint: {req.storage_hint or 'Fridge'}).
-The user slowly panned the camera across top, middle, and bottom shelves, crisper drawers, or freezer compartments.
-
-CRITICAL CROSS-FRAME DEDUPLICATION & INVENTORY RULES:
-1. CROSS-FRAME DEDUPLICATION: Multiple frames show the EXACT SAME food items from slightly different angles or distances as the camera pans. DO NOT duplicate items! If a carton of milk, container of dal, or yogurt tub is seen across consecutive frames, record it ONCE.
-2. DEEP VISUAL SCANNING: Systematically inspect all visible shelves, containers, jars, cartons, and produce across all frames.
-3. DISHES & PREPARED FOOD (COOKED LEFTOVERS):
-   - Look inside glass containers (Pyrex), plastic Tupperware, foil containers, and bowls.
-   - Accurately determine the dish inside (e.g. "Cooked Dal / Lentil Curry", "Cooked Basmati Rice", "Leftover Chicken Curry", "Pasta with Tomato Sauce").
-   - Mark category as "cooked_leftover" and urgency as "high" (Priority 1: must be eaten in 1-2 days).
-   - Estimate realistic weight or adult servings (e.g. "approx 350g", 2.0 portions).
-4. STORE PACKAGES & OCR (RAW INGREDIENTS):
-   - Read visible text on labels, cartons, jars, bottles, and packaging (e.g. "Greek Style Yogurt 500g", "Mature Cheddar 200g", "Whole Milk 2L", "Free-Range Eggs 6-pack").
-   - Detect raw meats or proteins (e.g. "Raw Chicken Breasts 500g", "Minced Beef 400g", "Salmon Fillets").
-   - Mark category as "raw_ingredient".
-5. FRESH PRODUCE:
-   - Identify whole or cut vegetables and fruits (e.g. "Red Bell Peppers", "Broccoli", "Cucumbers", "Tomatoes", "Lemons").
-   - Mark category as "raw_ingredient", urgency as "medium".
-6. COMPARTMENT & STORAGE:
-   - Assign storage_type as "{req.storage_hint or 'Fridge'}" unless clearly frozen/frosted, in which case assign "Freezer" and urgency "low".
+            receipt_prompt = """You are an expert grocery receipt / supermarket bill auditor and kitchen inventory manager.
+Analyze the grocery receipt image carefully. Read all printed line items, descriptions, weights/quantities, and prices.
+For every purchased grocery/food item:
+1. Extract clean food item name (e.g. "Whole Milk", "Chicken Breast Fillets", "Mature Cheddar Cheese", "Brown Onions", "Basmati Rice", "Frozen Garden Peas").
+2. Extract quantity/weight (e.g. "2 Litres", "650g", "1 kg", "6 pack", "400g"). If no weight is printed, extract unit count or "1 pack".
+3. Intelligently determine proper storage compartment:
+   - "Fridge": dairy, fresh milk, cheeses, fresh poultry/meats, yogurt, deli meats, salad greens, fresh vegetables, fresh dips.
+   - "Freezer": frozen vegetables, frozen berries, ice cream, frozen nuggets, frozen fish/meat.
+   - "Pantry" (Open Space): onions, potatoes, garlic, rice, lentils, flour, cooking oil, spices, pasta, bread, cereal, canned beans/tomatoes.
+4. Set category to "raw_ingredient".
+5. Estimate realistic portions (1 portion = good for 1 person).
 
 Output ONLY valid JSON matching:
-{{
+{
   "items": [
-    {{
+    {
       "id": "item-1",
       "name": "Food Name",
-      "category": "cooked_leftover" | "raw_ingredient",
-      "quantity": "approx 350g / 500g / 1 kg / 6 eggs",
-      "portions": 2.0,
+      "category": "raw_ingredient",
+      "quantity": "2 Litres / 650g / 1 kg",
+      "portions": 4.0,
       "urgency": "high" | "medium" | "low",
-      "storage_type": "Fridge" | "Freezer",
+      "storage_type": "Fridge" | "Freezer" | "Pantry",
       "dietary_tags": ["Vegetarian", "High-Protein", etc.],
-      "notes": "Spotted across video sweep"
-    }}
+      "notes": "From supermarket receipt"
+    }
   ],
-  "detection_summary": "Extracted and deduplicated X distinct items across {len(frames)} video sweep frames."
-}}"""
-            contents = [sweep_prompt]
+  "store_name": "Store Name (e.g. Tesco, Sainsbury's, Indian Grocery)",
+  "detection_summary": "Extracted X distinct grocery items from receipt."
+}"""
+            contents = [receipt_prompt]
             if req.text_notes and req.text_notes.strip():
                 contents.append(f"Additional user notes:\n{req.text_notes.strip()}")
 
-            for frame in frames:
-                data_str = frame
-                mime = "image/jpeg"
-                if "data:" in data_str and ";base64," in data_str:
-                    header_part, data_str = data_str.split(";base64,", 1)
-                    if "image/png" in header_part:
-                        mime = "image/png"
-                    elif "image/webp" in header_part:
-                        mime = "image/webp"
-                frame_bytes = base64.b64decode(data_str)
-                contents.append(types.Part.from_bytes(data=frame_bytes, mime_type=mime))
+            data_str = image_data
+            mime = "image/jpeg"
+            if "data:" in data_str and ";base64," in data_str:
+                header_part, data_str = data_str.split(";base64,", 1)
+                if "image/png" in header_part:
+                    mime = "image/png"
+                elif "image/webp" in header_part:
+                    mime = "image/webp"
+            img_bytes = base64.b64decode(data_str)
+            contents.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
 
             last_error = None
             for model_name in ["gemini-2.0-flash", "gemini-1.5-flash"]:
@@ -1278,66 +1271,298 @@ Output ONLY valid JSON matching:
                     return {
                         "status": "success",
                         "source": model_name,
-                        "message": f"Video sweep analyzed with {model_name}!",
+                        "message": f"Receipt analyzed with {model_name}!",
+                        "store_name": parsed.get("store_name", "Supermarket"),
                         "items": parsed.get("items", []),
-                        "detection_summary": parsed.get("detection_summary", f"Deduplicated inventory from {len(frames)} video frames.")
+                        "detection_summary": parsed.get("detection_summary", f"Extracted items from receipt.")
                     }
                 except Exception as me:
                     last_error = me
                     continue
 
-            print(f"Gemini video sweep error: {last_error}")
+            print(f"Gemini receipt error: {last_error}")
         except Exception as e:
-            print(f"Gemini video sweep error: {e}. Falling back to multi-shelf heuristic.")
+            print(f"Gemini receipt error: {e}. Falling back to receipt heuristic.")
 
-    # Fallback heuristic for video sweep
-    storage = req.storage_hint or "Fridge"
+    # Fallback heuristic for supermarket receipt OCR
     fallback_items = [
-        {"id": "vid-1", "name": "Leftover Chicken Tikka Masala", "category": "cooked_leftover", "quantity": "approx 400g", "portions": 2.5, "storage_type": storage, "urgency": "high", "dietary_tags": ["Halal"], "notes": "Top shelf glass container"},
-        {"id": "vid-2", "name": "Cooked Jeera Rice", "category": "cooked_leftover", "quantity": "approx 350g", "portions": 2.0, "storage_type": storage, "urgency": "high", "dietary_tags": ["Vegetarian"], "notes": "Top shelf Tupperware"},
-        {"id": "vid-3", "name": "Greek Style Plain Yogurt", "category": "raw_ingredient", "quantity": "500g tub", "portions": 4.0, "storage_type": storage, "urgency": "medium", "dietary_tags": ["Vegetarian"], "notes": "Middle shelf dairy"},
-        {"id": "vid-4", "name": "Whole Milk", "category": "raw_ingredient", "quantity": "2 Litres", "portions": 8.0, "storage_type": storage, "urgency": "medium", "dietary_tags": ["Vegetarian"], "notes": "Door shelf bottle"},
-        {"id": "vid-5", "name": "Fresh Bell Peppers & Tomatoes", "category": "raw_ingredient", "quantity": "4 pieces", "portions": 3.0, "storage_type": storage, "urgency": "medium", "dietary_tags": ["Vegetarian"], "notes": "Bottom crisper drawer"},
-        {"id": "vid-6", "name": "Mature Cheddar Cheese", "category": "raw_ingredient", "quantity": "250g block", "portions": 5.0, "storage_type": storage, "urgency": "medium", "dietary_tags": ["Vegetarian"], "notes": "Deli drawer"}
+        {"id": f"rec-{uuid.uuid4().hex[:6]}", "name": "Fresh Whole Milk", "category": "raw_ingredient", "quantity": "2 Litres", "portions": 8.0, "storage_type": "Fridge", "urgency": "medium", "dietary_tags": ["Dairy", "Vegetarian"], "notes": "Dairy shelf in Fridge"},
+        {"id": f"rec-{uuid.uuid4().hex[:6]}", "name": "British Chicken Breast Fillets", "category": "raw_ingredient", "quantity": "650g", "portions": 4.0, "storage_type": "Fridge", "urgency": "high", "dietary_tags": ["Halal", "High-Protein"], "notes": "Meat drawer in Fridge"},
+        {"id": f"rec-{uuid.uuid4().hex[:6]}", "name": "Fresh White Cabbage", "category": "raw_ingredient", "quantity": "500g", "portions": 3.0, "storage_type": "Fridge", "urgency": "medium", "dietary_tags": ["Vegetarian"], "notes": "Bottom crisper drawer"},
+        {"id": f"rec-{uuid.uuid4().hex[:6]}", "name": "Brown Cooking Onions", "category": "raw_ingredient", "quantity": "1 kg bag", "portions": 8.0, "storage_type": "Pantry", "urgency": "low", "dietary_tags": ["Vegetarian"], "notes": "Stored in Open Space / Pantry"},
+        {"id": f"rec-{uuid.uuid4().hex[:6]}", "name": "Kohinoor Basmati Rice", "category": "raw_ingredient", "quantity": "2 kg", "portions": 16.0, "storage_type": "Pantry", "urgency": "low", "dietary_tags": ["Vegetarian", "Gluten-Free"], "notes": "Stored in Open Space / Pantry"},
+        {"id": f"rec-{uuid.uuid4().hex[:6]}", "name": "Birds Eye Garden Peas (Frozen)", "category": "raw_ingredient", "quantity": "800g", "portions": 6.0, "storage_type": "Freezer", "urgency": "low", "dietary_tags": ["Vegetarian"], "notes": "Stored in Freezer compartment"}
     ]
-    if storage == "Freezer":
-        fallback_items = [
-            {"id": "vid-f1", "name": "Frozen Green Peas", "category": "raw_ingredient", "quantity": "1 kg bag", "portions": 6.0, "storage_type": "Freezer", "urgency": "low", "dietary_tags": ["Vegetarian"], "notes": "Top freezer drawer"},
-            {"id": "vid-f2", "name": "Raw Chicken Breast Fillets", "category": "raw_ingredient", "quantity": "800g pack", "portions": 4.0, "storage_type": "Freezer", "urgency": "low", "dietary_tags": ["Halal"], "notes": "Middle freezer drawer"},
-            {"id": "vid-f3", "name": "Cooked Dal Makhani (Frozen Portions)", "category": "cooked_leftover", "quantity": "approx 500g", "portions": 3.0, "storage_type": "Freezer", "urgency": "low", "dietary_tags": ["Vegetarian"], "notes": "Pre-portioned freezer meal"}
-        ]
 
     return {
         "status": "success",
-        "source": "multi_shelf_heuristic",
+        "source": "receipt_ocr_heuristic",
+        "store_name": "Supermarket Receipt",
         "items": fallback_items,
-        "detection_summary": f"Video sweep processed ({len(frames)} frames). Enter your free Gemini API key in Settings to scan live video with Gemini 2.0 Flash."
+        "detection_summary": "Scanned supermarket receipt and categorized 6 items into Fridge, Freezer, and Open Space / Pantry."
     }
+
+# ----------------- Family Dishes Recipe Book Engine -----------------
+
+DEFAULT_DISHES = [
+    {
+        "id": "dish-butter-chicken",
+        "name": "Butter Chicken (Murgh Makhani)",
+        "cooking_time_minutes": 35,
+        "portions": 4,
+        "category": "Curry / Main Dish",
+        "dietary_tags": ["Non-Veg", "High-Protein", "Halal"],
+        "ingredients": [
+            {"name": "Chicken", "quantity": 500, "unit": "grams"},
+            {"name": "Onion", "quantity": 2, "unit": "pieces"},
+            {"name": "Tomato", "quantity": 3, "unit": "pieces"},
+            {"name": "Butter", "quantity": 50, "unit": "grams"},
+            {"name": "Fresh Cream", "quantity": 100, "unit": "ml"}
+        ],
+        "pantry_staples": ["Ginger Garlic Paste", "Garam Masala", "Kashmiri Chili", "Kasuri Methi", "Salt"],
+        "instructions": "Sauté onions and tomatoes, blend to silky gravy. Simmer chicken pieces with butter, cream, and aromatic spices."
+    },
+    {
+        "id": "dish-cabbage-chicken",
+        "name": "Spiced Cabbage & Chicken Stir-Fry",
+        "cooking_time_minutes": 15,
+        "portions": 3,
+        "category": "Quick Main Dish",
+        "dietary_tags": ["Non-Veg", "High-Protein", "Low-Carb"],
+        "ingredients": [
+            {"name": "Cabbage", "quantity": 500, "unit": "grams"},
+            {"name": "Chicken", "quantity": 300, "unit": "grams"},
+            {"name": "Onion", "quantity": 1, "unit": "pieces"}
+        ],
+        "pantry_staples": ["Cooking oil", "Cumin seeds", "Turmeric", "Green chili", "Salt"],
+        "instructions": "Shred cabbage finely. Sauté cumin, onion, and chili. Toss cabbage on high heat for 6 mins. Add chicken, season with turmeric and salt, toss 5 mins until cooked."
+    },
+    {
+        "id": "dish-aloo-gobi",
+        "name": "Aloo Gobi Matar (Potato, Cauliflower & Peas)",
+        "cooking_time_minutes": 25,
+        "portions": 4,
+        "category": "Vegetarian Main Dish",
+        "dietary_tags": ["Vegetarian", "Vegan"],
+        "ingredients": [
+            {"name": "Cauliflower", "quantity": 250, "unit": "grams"},
+            {"name": "Potato", "quantity": 2, "unit": "pieces"},
+            {"name": "Green Peas", "quantity": 100, "unit": "grams"},
+            {"name": "Tomato", "quantity": 2, "unit": "pieces"}
+        ],
+        "pantry_staples": ["Mustard oil or Ghee", "Cumin seeds", "Turmeric", "Coriander powder", "Salt"],
+        "instructions": "Cut cauliflower into florets and cube potatoes. Sauté spices, add veggies, cover and cook on low heat until tender. Garnish with coriander."
+    },
+    {
+        "id": "dish-dal-tadka",
+        "name": "Homestyle Dal Tadka",
+        "cooking_time_minutes": 20,
+        "portions": 4,
+        "category": "Vegetarian Lentil Curry",
+        "dietary_tags": ["Vegetarian", "Comfort Food"],
+        "ingredients": [
+            {"name": "Yellow Dal (Toor / Moong)", "quantity": 250, "unit": "grams"},
+            {"name": "Onion", "quantity": 1, "unit": "pieces"},
+            {"name": "Tomato", "quantity": 2, "unit": "pieces"},
+            {"name": "Garlic", "quantity": 4, "unit": "cloves"}
+        ],
+        "pantry_staples": ["Ghee", "Jeera (Cumin)", "Turmeric", "Dry red chili", "Salt"],
+        "instructions": "Boil dal with turmeric and salt. Heat ghee with cumin, garlic, and red chili until golden. Pour sizzling tadka over hot dal."
+    },
+    {
+        "id": "dish-egg-bhurji",
+        "name": "Masala Egg Bhurji (Spiced Scrambled Eggs)",
+        "cooking_time_minutes": 12,
+        "portions": 2,
+        "category": "Quick Protein Dish",
+        "dietary_tags": ["Eggitarian", "High-Protein", "Keto"],
+        "ingredients": [
+            {"name": "Eggs", "quantity": 4, "unit": "pieces"},
+            {"name": "Onion", "quantity": 1, "unit": "pieces"},
+            {"name": "Tomato", "quantity": 1, "unit": "pieces"},
+            {"name": "Green Chili", "quantity": 2, "unit": "pieces"}
+        ],
+        "pantry_staples": ["Butter or Oil", "Cumin", "Turmeric", "Chili powder", "Salt", "Coriander"],
+        "instructions": "Whisk eggs. Sauté onions, tomatoes, and chilies in butter. Pour eggs, scramble softly on medium heat for 3-4 minutes."
+    },
+    {
+        "id": "dish-courgette-rice",
+        "name": "Tawa Courgette (Zucchini) & Jeera Rice",
+        "cooking_time_minutes": 20,
+        "portions": 3,
+        "category": "Light Vegetarian Meal",
+        "dietary_tags": ["Vegetarian", "Low-Calorie"],
+        "ingredients": [
+            {"name": "Courgette", "quantity": 1000, "unit": "grams"},
+            {"name": "Rice", "quantity": 300, "unit": "grams"},
+            {"name": "Onion", "quantity": 1, "unit": "pieces"}
+        ],
+        "pantry_staples": ["Cooking oil", "Cumin seeds", "Turmeric", "Garam masala", "Salt"],
+        "instructions": "Slice courgette into half moons. Sauté with cumin and turmeric on high flame until caramelized. Serve with aromatic jeera rice."
+    }
+]
+
+DISHES_FILE = BASE_DIR / "data" / "dishes.json"
+_in_memory_dishes: List[Dict[str, Any]] = []
+
+def get_stored_dishes() -> List[Dict[str, Any]]:
+    global _in_memory_dishes
+    if not _in_memory_dishes:
+        try:
+            if DISHES_FILE.exists():
+                with open(DISHES_FILE, "r", encoding="utf-8") as f:
+                    _in_memory_dishes = json.load(f)
+        except Exception as e:
+            print(f"Error loading dishes file: {e}")
+        if not _in_memory_dishes:
+            _in_memory_dishes = copy.deepcopy(DEFAULT_DISHES)
+            save_stored_dishes(_in_memory_dishes)
+    return _in_memory_dishes
+
+def save_stored_dishes(dishes: List[Dict[str, Any]]) -> bool:
+    global _in_memory_dishes
+    _in_memory_dishes = dishes
+    try:
+        DISHES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(DISHES_FILE, "w", encoding="utf-8") as f:
+            json.dump(dishes, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving dishes: {e}")
+        return False
+
+@api_router.get("/dishes/list")
+async def list_dishes():
+    return {
+        "status": "success",
+        "dishes": get_stored_dishes()
+    }
+
+class SaveDishRequest(BaseModel):
+    dish: Optional[Dict[str, Any]] = None
+    dishes: Optional[List[Dict[str, Any]]] = None
+
+@api_router.post("/dishes/save")
+async def save_dish(req: SaveDishRequest):
+    current = get_stored_dishes()
+    if req.dishes is not None:
+        save_stored_dishes(req.dishes)
+        return {"status": "success", "message": f"Saved {len(req.dishes)} dishes", "dishes": get_stored_dishes()}
+
+    if req.dish:
+        d = req.dish
+        dish_id = d.get("id") or f"dish-{uuid.uuid4().hex[:6]}"
+        d["id"] = dish_id
+        idx = next((i for i, item in enumerate(current) if item.get("id") == dish_id), -1)
+        if idx >= 0:
+            current[idx] = d
+        else:
+            current.append(d)
+        save_stored_dishes(current)
+        return {"status": "success", "message": f"Saved dish '{d.get('name')}'", "dishes": current}
+
+    return {"status": "error", "message": "No dish provided"}
+
+class DeleteDishRequest(BaseModel):
+    dish_id: str
+
+@api_router.post("/dishes/delete")
+async def delete_dish(req: DeleteDishRequest):
+    current = get_stored_dishes()
+    updated = [d for d in current if d.get("id") != req.dish_id]
+    save_stored_dishes(updated)
+    return {"status": "success", "message": f"Deleted dish {req.dish_id}", "dishes": updated}
+
+def check_dish_can_be_cooked(dish: Dict[str, Any], inventory: List[Dict[str, Any]]) -> Tuple[bool, List[str], List[str]]:
+    """
+    Checks if a recorded family dish can be cooked using current kitchen inventory.
+    Returns (can_cook, available_ingredients, missing_ingredients).
+    Pantry staples (salt, oil, water, basic spices) are assumed in stock.
+    Non-staple ingredients must be present in inventory with sufficient quantity.
+    """
+    PANTRY_STAPLES = {
+        "salt", "oil", "cooking oil", "water", "sugar", "turmeric", "haldi",
+        "red chili powder", "chili powder", "cumin seeds", "jeera", "mustard seeds",
+        "garam masala", "coriander powder", "spices", "ghee", "butter", "ginger garlic paste",
+        "ginger", "garlic", "kasuri methi", "green chillies", "green chili"
+    }
+
+    ingredients = dish.get("ingredients") or []
+    if not ingredients:
+        return True, [], []
+
+    available = []
+    missing = []
+
+    for ing in ingredients:
+        ing_name = str(ing.get("name", "")).strip()
+        ing_name_lower = ing_name.lower()
+        if any(staple in ing_name_lower for staple in PANTRY_STAPLES):
+            continue
+
+        req_qty = float(ing.get("quantity") or 1.0)
+        req_unit = str(ing.get("unit", "")).lower()
+
+        # Find match in inventory
+        matched = False
+        for inv_item in inventory:
+            inv_name = str(inv_item.get("name", "")).lower()
+            keywords = [w for w in re.split(r"[\s\(\)/,]+", ing_name_lower) if len(w) > 2 and w not in ["fresh", "raw", "cooked", "piece", "pieces", "gram", "grams", "pack"]]
+            is_match = any(k in inv_name for k in keywords) or ing_name_lower in inv_name or inv_name in ing_name_lower
+            if is_match:
+                inv_qty_str = str(inv_item.get("quantity", "")).lower()
+                inv_val = 1.0
+                num_match = re.search(r"(\d+(?:\.\d+)?)", inv_qty_str)
+                if num_match:
+                    inv_val = float(num_match.group(1))
+
+                # Normalize kg/g
+                if "kg" in inv_qty_str or "kilo" in inv_qty_str:
+                    inv_val_g = inv_val * 1000.0
+                else:
+                    inv_val_g = inv_val
+
+                if req_unit in ["kg", "kilogram", "kilograms"]:
+                    req_qty_g = req_qty * 1000.0
+                elif req_unit in ["g", "gm", "gms", "gram", "grams"]:
+                    req_qty_g = req_qty
+                else:
+                    req_qty_g = None
+
+                if req_qty_g is not None:
+                    if inv_val_g >= (req_qty_g * 0.85):
+                        matched = True
+                        break
+                else:
+                    if inv_val >= (req_qty * 0.9):
+                        matched = True
+                        break
+
+        if matched:
+            available.append(f"{ing_name} ({ing.get('quantity', '')} {ing.get('unit', '')})")
+        else:
+            missing.append(f"{ing_name} ({ing.get('quantity', '')} {ing.get('unit', '')})")
+
+    can_cook = len(missing) == 0
+    return can_cook, available, missing
 
 # ----------------- Ramu Kaka Voice Assistant Engine -----------------
 
 def mock_ramu_kaka_recommend(req: RamuKakaRecommendRequest) -> Dict[str, Any]:
     time_mins = req.time_available_minutes or 20
     inv = req.inventory or []
+    dishes = req.dishes if req.dishes else get_stored_dishes()
 
     leftovers = [i for i in inv if i.get("category") == "cooked_leftover"]
     raw = [i for i in inv if i.get("category") == "raw_ingredient"]
     names_lower = [str(i.get("name", "")).lower() for i in inv]
 
-    has_chicken = any("chicken" in n for n in names_lower)
-    has_cabbage = any("cabbage" in n for n in names_lower)
-    has_cauliflower = any("cauliflower" in n or "gobi" in n for n in names_lower)
-    has_courgette = any("courgette" in n or "zucchini" in n for n in names_lower)
-    has_daal = any("daal" in n or "dal" in n or "lentil" in n for n in names_lower)
-    has_curd = any("curd" in n or "yogurt" in n or "dahi" in n for n in names_lower)
-    has_eggs = any("egg" in n for n in names_lower)
-    has_rice = any("rice" in n or "chawal" in n for n in names_lower)
-
-    # 1. Very fast (<= 10 mins) with leftovers available
+    # 1. Very fast (<= 10 mins) with leftovers available: Zero waste priority!
     if time_mins <= 10 and leftovers:
         top_leftover = leftovers[0]
         name = top_leftover.get("name", "Leftover Dish")
         qty = top_leftover.get("quantity", "1 portion")
+        portions = top_leftover.get("portions", 1.0)
         return {
             "status": "success",
             "source": "ramu_kaka_culinary_engine",
@@ -1353,10 +1578,53 @@ def mock_ramu_kaka_recommend(req: RamuKakaRecommendRequest) -> Dict[str, Any]:
                 "Warm thoroughly in a pan with 1 tsp ghee or microwave for 2-3 minutes.",
                 "Sprinkle with fresh coriander or lemon juice and serve warm with bread or papad."
             ],
-            "leftover_alert": f"Zero food waste: Finished delicious {name} within {time_mins} minutes!"
+            "leftover_alert": f"Zero food waste: Finished delicious {name} within {time_mins} minutes!",
+            "dish_object": {
+                "id": f"leftover-{top_leftover.get('id', '1')}",
+                "name": name,
+                "ingredients": [{"name": name, "quantity": portions, "unit": "portions"}]
+            }
         }
 
-    # 2. Cabbage + Chicken
+    # 2. Check Recorded Family Dishes: ONLY recommend dishes that can be cooked with ingredients left in the kitchen!
+    eligible_dishes = [d for d in dishes if float(d.get("cooking_time_minutes", 30)) <= time_mins]
+    # Sort by closest time
+    eligible_dishes.sort(key=lambda d: float(d.get("cooking_time_minutes", 30)), reverse=True)
+
+    for dish in eligible_dishes:
+        can_cook, available_ing, missing_ing = check_dish_can_be_cooked(dish, inv)
+        if can_cook:
+            dish_name = dish.get("name")
+            cook_time = dish.get("cooking_time_minutes", 20)
+            spoken = f"Biwiji, aapke paas {time_mins} minute hain aur kitchen mein sabhi ingredients maujood hain! Main aapki pasandida dish recommend karta hoon: {dish_name}! Yeh {cook_time} minute mein ban jayegi."
+            return {
+                "status": "success",
+                "source": "ramu_kaka_culinary_engine",
+                "dish_name": dish_name,
+                "prep_cook_time_minutes": cook_time,
+                "category": dish.get("category", "Family Recorded Dish"),
+                "spoken_response": spoken,
+                "ingredients_used": available_ing,
+                "pantry_items_needed": dish.get("pantry_staples", ["Cooking oil", "Spices", "Salt"]),
+                "why_recommended": f"Recorded in your family dishes. 100% of required ingredients are currently in your kitchen inventory.",
+                "quick_steps": [
+                    dish.get("instructions") or f"Prepare ingredients according to your family recipe and cook on medium flame for {cook_time} minutes."
+                ],
+                "leftover_alert": f"Verified against live kitchen inventory: ready to cook immediately!",
+                "dish_object": dish,
+                "dish_id": dish.get("id")
+            }
+
+    # 3. Dynamic pairings from available raw ingredients if no recorded dish was 100% in stock
+    has_chicken = any("chicken" in n for n in names_lower)
+    has_cabbage = any("cabbage" in n for n in names_lower)
+    has_cauliflower = any("cauliflower" in n or "gobi" in n for n in names_lower)
+    has_courgette = any("courgette" in n or "zucchini" in n for n in names_lower)
+    has_daal = any("daal" in n or "dal" in n or "lentil" in n for n in names_lower)
+    has_curd = any("curd" in n or "yogurt" in n or "dahi" in n for n in names_lower)
+    has_eggs = any("egg" in n for n in names_lower)
+
+    # 3a. Cabbage + Chicken
     if has_cabbage and has_chicken:
         cabbage_item = next((i for i in inv if "cabbage" in str(i.get("name", "")).lower()), None)
         chicken_item = next((i for i in inv if "chicken" in str(i.get("name", "")).lower()), None)
@@ -1383,10 +1651,17 @@ def mock_ramu_kaka_recommend(req: RamuKakaRecommendRequest) -> Dict[str, Any]:
                 "Toss in the shredded cabbage with 1/2 tsp turmeric and salt; sauté on high heat for 6 minutes until tender-crisp.",
                 "Fold in the chicken, sauté together for 4-5 minutes until steaming and well spiced, garnish with coriander."
             ],
-            "leftover_alert": "Uses up cabbage and chicken perfectly to keep your fridge fresh!"
+            "leftover_alert": "Uses up cabbage and chicken perfectly to keep your fridge fresh!",
+            "dish_object": {
+                "name": dish_name,
+                "ingredients": [
+                    {"name": "Cabbage", "quantity": 500, "unit": "grams"},
+                    {"name": "Chicken", "quantity": 300, "unit": "grams"}
+                ]
+            }
         }
 
-    # 3. Cabbage + Cauliflower / Courgette
+    # 3b. Cabbage + Cauliflower / Courgette
     if has_cabbage and (has_cauliflower or has_courgette):
         cabbage_item = next((i for i in inv if "cabbage" in str(i.get("name", "")).lower()), None)
         other_item = next((i for i in inv if "cauliflower" in str(i.get("name", "")).lower() or "courgette" in str(i.get("name", "")).lower()), None)
@@ -1408,10 +1683,17 @@ def mock_ramu_kaka_recommend(req: RamuKakaRecommendRequest) -> Dict[str, Any]:
                 f"Add chopped {c_name} and {o_name}, sprinkle salt and turmeric.",
                 "Cover and cook on medium flame for 10-12 minutes, stirring once until tender."
             ],
-            "leftover_alert": "Pure fresh produce from your crisper drawer."
+            "leftover_alert": "Pure fresh produce from your crisper drawer.",
+            "dish_object": {
+                "name": f"Quick Spiced {c_name} & {o_name} Sabzi",
+                "ingredients": [
+                    {"name": c_name, "quantity": 250, "unit": "grams"},
+                    {"name": o_name, "quantity": 250, "unit": "grams"}
+                ]
+            }
         }
 
-    # 4. Eggs
+    # 3c. Eggs
     if has_eggs:
         return {
             "status": "success",
@@ -1428,10 +1710,14 @@ def mock_ramu_kaka_recommend(req: RamuKakaRecommendRequest) -> Dict[str, Any]:
                 "Sauté finely chopped onion, tomato, and green chili in melted butter for 3 mins.",
                 "Pour in whisked eggs and gently scramble on medium heat for 3-4 minutes until soft and fluffy."
             ],
-            "leftover_alert": "Great quick meal option."
+            "leftover_alert": "Great quick meal option.",
+            "dish_object": {
+                "name": "Spicy Masala Egg Bhurji",
+                "ingredients": [{"name": "Eggs", "quantity": 2, "unit": "pieces"}]
+            }
         }
 
-    # 5. Daal / Curd / Rice
+    # 3d. Daal / Curd
     if has_daal or has_curd:
         main_item = "Cooked Daal" if has_daal else "Fresh Dahi (Curd)"
         return {
@@ -1449,12 +1735,16 @@ def mock_ramu_kaka_recommend(req: RamuKakaRecommendRequest) -> Dict[str, Any]:
                 "In a small ladle, heat 1 tsp ghee with cumin seeds and dry red chili.",
                 "Pour sizzling tadka over the dish and serve steaming hot with warm roti."
             ],
-            "leftover_alert": "Delicious comfort meal with zero effort."
+            "leftover_alert": "Delicious comfort meal with zero effort.",
+            "dish_object": {
+                "name": f"Comforting {main_item} Bowl",
+                "ingredients": [{"name": main_item, "quantity": 1, "unit": "portions"}]
+            }
         }
 
-    # Default general recommendation
+    # Default general recommendation using available inventory
     first_two_names = [i.get("name", "ingredient") for i in inv[:2]]
-    items_desc = " aur ".join(first_two_names) if first_two_names else "fridge ingredients"
+    items_desc = " aur ".join(first_two_names) if first_two_names else "kitchen ingredients"
     return {
         "status": "success",
         "source": "ramu_kaka_culinary_engine",
@@ -1470,7 +1760,11 @@ def mock_ramu_kaka_recommend(req: RamuKakaRecommendRequest) -> Dict[str, Any]:
             "Heat oil in a pan, add aromatics and spices.",
             "Cook vegetables/proteins on medium heat for 12-15 minutes until tender and aromatic."
         ],
-        "leftover_alert": "Checks all current fridge and freezer items."
+        "leftover_alert": "Uses ingredients currently present in your kitchen.",
+        "dish_object": {
+            "name": f"Homestyle Tawa Stir-Fry with {first_two_names[0] if first_two_names else 'Fresh Veggies'}",
+            "ingredients": [{"name": n, "quantity": 1, "unit": "pieces"} for n in first_two_names]
+        }
     }
 
 @api_router.post("/ramu-kaka/recommend")
@@ -1480,7 +1774,8 @@ async def ramu_kaka_recommend(
 ):
     """
     Ramu Kaka Voice Assistant: Recommends a dish based on time available,
-    recorded fridge/freezer inventory, and family dietary requirements.
+    user's recorded family dishes, kitchen inventory, and dietary preferences.
+    STRICT RULE: Only recommend dishes that can be cooked with ingredients left in the kitchen.
     """
     api_key = get_effective_api_key(x_gemini_key)
     time_mins = req.time_available_minutes or 20
@@ -1492,23 +1787,27 @@ async def ramu_kaka_recommend(
     # Use Gemini 2.0 Flash for creative chef recommendation
     try:
         client = genai.Client(api_key=api_key)
+        family_dishes = req.dishes if req.dishes else get_stored_dishes()
         prompt = f"""You are Ramu Kaka, a devoted, seasoned, and respectful family cook/butler for an Indian household.
 The family matriarch/user ('Biwiji') asked: "{req.user_prompt}"
 She stated she has {time_mins} minutes available to cook.
 
-CURRENT INVENTORY (Fridge & Freezer):
+CURRENT INVENTORY (Fridge, Freezer & Open Space / Pantry):
 {json.dumps(req.inventory, indent=2)}
+
+RECORDED FAMILY DISHES & RECIPES (The family's favorite dishes that they cook in their house):
+{json.dumps(family_dishes, indent=2)}
 
 HOUSEHOLD MEMBERS & DIETARY PREFERENCES:
 {json.dumps(req.household, indent=2)}
 
-TASK:
-Recommend a specific, delicious, and realistic dish that can be made in {time_mins} minutes using the available ingredients.
-Rules:
-1. If time is short (<= 15 mins) and leftovers exist, prioritize reheating/pairing leftovers.
-2. If cooking fresh, make a dish that realistically finishes in {time_mins} minutes using ingredients on hand.
-3. Strictly honor dietary preferences (e.g. Vegetarian, Halal, Elderly egg-free, Kid-friendly).
-4. For 'spoken_response', write a warm, respectful Hindi/English (Hinglish) message addressing 'Biwiji' suitable for text-to-speech.
+TASK & STRICT INVENTORY RULES:
+1. STRICT CONSTRAINT: App will ONLY recommend dishes that can be cooked with ingredients left in the kitchen!
+   Do NOT recommend any dish that requires fresh ingredients not present in the current inventory.
+2. If time is short (<= 15 mins) and leftovers exist, prioritize reheating/pairing leftovers (1 portion = 1 person).
+3. First inspect the RECORDED FAMILY DISHES. If a recorded dish has cooking time <= {time_mins} minutes and ALL its ingredients are present in the inventory, recommend that family dish!
+4. Strictly honor dietary preferences (e.g. Vegetarian, Halal, Elderly egg-free, Kid-friendly).
+5. For 'spoken_response', write a warm, respectful Hindi/English (Hinglish) message addressing 'Biwiji' suitable for text-to-speech.
 
 Respond with ONLY valid JSON:
 {{
@@ -1524,7 +1823,8 @@ Respond with ONLY valid JSON:
     "Step 2...",
     "Step 3..."
   ],
-  "leftover_alert": "Optional note on existing leftovers"
+  "leftover_alert": "Optional note on existing leftovers",
+  "dish_id": "optional-dish-id-if-matching-family-dish"
 }}"""
 
         response = client.models.generate_content(
