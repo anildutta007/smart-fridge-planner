@@ -395,6 +395,21 @@ def test_ramu_kaka_recommend_endpoint():
     assert "cabbage" in data["dish_name"].lower() or "chicken" in data["dish_name"].lower()
     print(f"[OK] Ramu Kaka Voice Recommendation verified: '{data['dish_name']}' in {data['prep_cook_time_minutes']} mins with spoken greeting: {data['spoken_response'][:60]}...")
 
+def test_transcribe_audio_endpoint():
+    import base64
+    dummy_audio_b64 = base64.b64encode(b"RIFF....WAVEfmt ....data....").decode("ascii")
+    payload = {
+        "audio": f"data:audio/webm;base64,{dummy_audio_b64}",
+        "mime_type": "audio/webm",
+        "language_hint": "en-US"
+    }
+    res = client.post("/api/transcribe-audio", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] in ["success", "warning"]
+    assert "transcript" in data
+    print(f"[OK] Transcribe Audio Endpoint verified: status={data['status']}, transcript='{data.get('transcript', '')}'")
+
 if __name__ == "__main__":
     try:
         test_health()
@@ -402,6 +417,7 @@ if __name__ == "__main__":
         test_analyze_fridge_fallback()
         test_spoken_or_typed_items_nlp()
         test_parse_voice_endpoint()
+        test_transcribe_audio_endpoint()
         test_continuous_stream_voice_dictation()
         test_word_numbers_voice_dictation()
         test_ramu_kaka_recommend_endpoint()

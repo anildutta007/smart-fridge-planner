@@ -902,15 +902,26 @@
         <!-- Dynamic Dish Details inserted here -->
       </div>
 
-      <!-- Footer & Microphone Control -->
-      <div class="p-3.5 sm:p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-2.5">
-        <button id="btnRamuMicToggle" onclick="toggleRamuListening()" class="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-md active:scale-95 transition cursor-pointer">
-          <i id="ramuMicIcon" class="ph-bold ph-microphone text-lg"></i>
-          <span id="ramuMicLabel">Tap to Speak</span>
-        </button>
-        <button onclick="restartRamuConversation()" class="p-3 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold flex items-center space-x-1 cursor-pointer" title="Restart Conversation">
-          <i class="ph-bold ph-arrows-clockwise text-base"></i>
-        </button>
+      <!-- Footer & Microphone / Text Controls -->
+      <div class="p-3.5 sm:p-4 bg-white border-t border-slate-200 space-y-2.5">
+        <div class="flex items-center justify-between gap-2.5">
+          <button id="btnRamuMicToggle" onclick="toggleRamuListening()" type="button" class="flex-1 py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold text-sm flex items-center justify-center space-x-2 shadow-md active:scale-95 transition cursor-pointer">
+            <i id="ramuMicIcon" class="ph-bold ph-microphone text-lg"></i>
+            <span id="ramuMicLabel">Tap to Speak</span>
+          </button>
+          <button onclick="restartRamuConversation()" type="button" class="p-3 rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold flex items-center space-x-1 cursor-pointer" title="Restart Conversation">
+            <i class="ph-bold ph-arrows-clockwise text-base"></i>
+          </button>
+        </div>
+
+        <!-- Text Typing Fallback for Edge/Desktop/Noisy Rooms -->
+        <div class="flex items-center space-x-2">
+          <input type="text" id="ramuTextInput" onkeydown="handleRamuInputKey(event)" placeholder="Speak above, or type 'What to cook for 20 mins'..." class="flex-1 text-xs p-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-none transition">
+          <button onclick="sendRamuTextMessage()" type="button" class="px-3.5 py-2.5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center space-x-1 transition active:scale-95 cursor-pointer">
+            <i class="ph-bold ph-paper-plane-right text-sm"></i>
+            <span>Send</span>
+          </button>
+        </div>
       </div>
 
     </div>

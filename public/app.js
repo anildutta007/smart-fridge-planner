@@ -195,13 +195,14 @@ function switchCaptureMode(mode) {
 // ==========================================
 // MODE 1: MULTI-ITEM VOICE RECORDING & PARSER
 // ==========================================
-function toggleVoiceRecording() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    showToast("Voice input is not supported in this browser. Please use the Type / Paste tab.", "warning");
-    return;
-  }
+const mainVoiceAudioState = {
+  mediaStream: null,
+  mediaRecorder: null,
+  audioChunks: [],
+  transcriptReceived: false
+};
 
+async function toggleVoiceRecording() {
   const btn = document.getElementById("btnVoiceRecord");
   const micIcon = document.getElementById("voiceMicIcon");
   const micLabel = document.getElementById("voiceMicLabel");
@@ -211,71 +212,188 @@ function toggleVoiceRecording() {
 
   if (appState.isRecordingSpeech) {
     if (appState.speechRecognitionInstance) {
-      appState.speechRecognitionInstance.stop();
+      try { appState.speechRecognitionInstance.stop(); } catch (_) {}
     }
+    await stopMainVoiceRecordingAndProcess();
     return;
   }
 
+  // Explicitly prompt / test microphone access for Edge & browsers
+  let stream = null;
   try {
-    appState.speechRecognitionInstance = new SpeechRecognition();
-    appState.speechRecognitionInstance.continuous = true;
-    appState.speechRecognitionInstance.interimResults = true;
-    appState.speechRecognitionInstance.lang = "en-US";
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mainVoiceAudioState.mediaStream = stream;
+    }
+  } catch (micErr) {
+    console.warn("Microphone access error in Edge:", micErr);
+    showToast("⚠️ Microphone access denied. In Microsoft Edge, click the lock/mic icon in the address bar to allow.", "warning");
+    return;
+  }
 
-    let initialText = textInput ? textInput.value.trim() : "";
-    if (initialText) {
-      if (!initialText.endsWith(",") && !initialText.endsWith("\n")) {
-        initialText += ", ";
-      } else if (initialText.endsWith(",")) {
-        initialText += " ";
+  appState.isRecordingSpeech = true;
+  mainVoiceAudioState.transcriptReceived = false;
+  mainVoiceAudioState.audioChunks = [];
+
+  // Start MediaRecorder (Engine B fallback for Edge)
+  if (stream && typeof MediaRecorder !== "undefined") {
+    try {
+      let mimeType = "";
+      if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) mimeType = "audio/webm;codecs=opus";
+      else if (MediaRecorder.isTypeSupported("audio/webm")) mimeType = "audio/webm";
+      else if (MediaRecorder.isTypeSupported("audio/mp4")) mimeType = "audio/mp4";
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mainVoiceAudioState.mediaRecorder = recorder;
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          mainVoiceAudioState.audioChunks.push(e.data);
+        }
+      };
+      recorder.start(250);
+    } catch (e) {
+      console.warn("Main voice MediaRecorder notice:", e);
+    }
+  }
+
+  // Update UI for active listening
+  if (btn) {
+    btn.className = "px-5 py-3 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm flex items-center space-x-2.5 shadow-lg animate-pulse transition active:scale-95 cursor-pointer";
+  }
+  if (micIcon) micIcon.className = "ph-bold ph-stop text-xl";
+  if (micLabel) micLabel.textContent = "Stop Recording (Tap when Done)";
+  if (waveContainer) waveContainer.classList.remove("hidden");
+  if (statusText) {
+    statusText.innerHTML = `<span class="text-red-600 font-bold">🔴 Listening live:</span> Speak your food items naturally! Say quantities & storage locations.`;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    try {
+      const rec = new SpeechRecognition();
+      appState.speechRecognitionInstance = rec;
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = navigator.language || "en-US";
+
+      let initialText = textInput ? textInput.value.trim() : "";
+      if (initialText) {
+        if (!initialText.endsWith(",") && !initialText.endsWith("\n")) {
+          initialText += ", ";
+        } else if (initialText.endsWith(",")) {
+          initialText += " ";
+        }
+      }
+
+      rec.onresult = (event) => {
+        let currentSessionTranscript = "";
+        for (let i = 0; i < event.results.length; ++i) {
+          currentSessionTranscript += event.results[i][0].transcript;
+        }
+        if (textInput && currentSessionTranscript.trim()) {
+          textInput.value = initialText + currentSessionTranscript;
+          mainVoiceAudioState.transcriptReceived = true;
+        }
+      };
+
+      rec.onerror = (event) => {
+        console.warn("Speech recognition error in Edge/browser:", event.error);
+        if (event.error === "not-allowed") {
+          showToast("Microphone access was denied. Please allow microphone permissions in Edge.", "error");
+        }
+      };
+
+      rec.onend = () => {
+        // Recognition completed
+      };
+
+      rec.start();
+    } catch (err) {
+      console.warn("Web Speech API init error in Edge:", err);
+    }
+  }
+}
+
+async function stopMainVoiceRecordingAndProcess() {
+  appState.isRecordingSpeech = false;
+  stopVoiceRecordingUI();
+
+  if (appState.speechRecognitionInstance) {
+    try { appState.speechRecognitionInstance.stop(); } catch (_) {}
+    appState.speechRecognitionInstance = null;
+  }
+
+  const recorder = mainVoiceAudioState.mediaRecorder;
+  if (recorder && recorder.state !== "inactive") {
+    await new Promise(resolve => {
+      recorder.onstop = resolve;
+      try { recorder.stop(); } catch (_) { resolve(); }
+    });
+  }
+
+  if (mainVoiceAudioState.mediaStream) {
+    try {
+      mainVoiceAudioState.mediaStream.getTracks().forEach(t => t.stop());
+    } catch (_) {}
+    mainVoiceAudioState.mediaStream = null;
+  }
+
+  const textInput = document.getElementById("voiceTranscriptInput");
+  const currentText = textInput ? textInput.value.trim() : "";
+
+  // If Web Speech API already populated textInput, we're done
+  if (mainVoiceAudioState.transcriptReceived && currentText) {
+    showToast("Voice recorded! Click 'Document Spoken Items' to add them to your fridge.", "success");
+    return;
+  }
+
+  // Fallback to Gemini Audio Transcription if Web Speech produced nothing (common in Edge)
+  const chunks = mainVoiceAudioState.audioChunks;
+  if (chunks && chunks.length > 0) {
+    const audioBlob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
+    if (audioBlob.size > 1200) {
+      showToast("Transcribing voice recording with Gemini AI...", "info");
+      try {
+        const reader = new FileReader();
+        const base64Promise = new Promise(resolve => {
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(audioBlob);
+        });
+        const base64Data = await base64Promise;
+
+        const headers = { "Content-Type": "application/json" };
+        if (appState.apiKey) headers["X-Gemini-Key"] = appState.apiKey;
+
+        const res = await fetch("/api/transcribe-audio", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            audio: base64Data,
+            mime_type: audioBlob.type || "audio/webm"
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "success" && data.transcript && data.transcript.trim()) {
+            if (textInput) {
+              const prefix = textInput.value.trim() ? (textInput.value.trim() + ", ") : "";
+              textInput.value = prefix + data.transcript.trim();
+            }
+            showToast("✨ Voice transcribed! Click 'Document Spoken Items' to document.", "success");
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn("Transcribe audio fallback error:", e);
       }
     }
+  }
 
-    appState.speechRecognitionInstance.onstart = () => {
-      appState.isRecordingSpeech = true;
-      if (btn) {
-        btn.className = "px-5 py-3 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-bold text-sm flex items-center space-x-2.5 shadow-lg animate-pulse transition active:scale-95 cursor-pointer";
-      }
-      if (micIcon) micIcon.className = "ph-bold ph-stop text-xl";
-      if (micLabel) micLabel.textContent = "Stop Recording (Tap when Done)";
-      if (waveContainer) waveContainer.classList.remove("hidden");
-      if (statusText) {
-        statusText.innerHTML = `<span class="text-red-600 font-bold">🔴 Listening live:</span> Say as many items as you want! We'll separate every item automatically.`;
-      }
-    };
-
-    appState.speechRecognitionInstance.onresult = (event) => {
-      let currentSessionTranscript = "";
-      for (let i = 0; i < event.results.length; ++i) {
-        currentSessionTranscript += event.results[i][0].transcript;
-      }
-      if (textInput) {
-        textInput.value = initialText + currentSessionTranscript;
-      }
-    };
-
-    appState.speechRecognitionInstance.onerror = (event) => {
-      console.warn("Speech recognition error:", event.error);
-      if (event.error === "not-allowed") {
-        showToast("Microphone access was denied. Please allow microphone permissions in your browser.", "error");
-      } else {
-        showToast(`Voice input notice: ${event.error}`, "info");
-      }
-      stopVoiceRecordingUI();
-    };
-
-    appState.speechRecognitionInstance.onend = () => {
-      stopVoiceRecordingUI();
-      if (textInput && textInput.value.trim()) {
-        showToast("Voice recorded! Click 'Document Spoken Items' to add them to your fridge.", "success");
-      }
-    };
-
-    appState.speechRecognitionInstance.start();
-  } catch (err) {
-    console.error("Speech recognition error:", err);
-    showToast("Could not start voice recognition: " + err.message, "error");
-    stopVoiceRecordingUI();
+  if (currentText) {
+    showToast("Voice recorded! Click 'Document Spoken Items' to add them to your fridge.", "success");
+  } else {
+    showToast("No speech recognized. Please speak closer to your microphone or try again.", "info");
   }
 }
 
@@ -2874,10 +2992,14 @@ function closeRamuKakaModal() {
   if (window.speechSynthesis) window.speechSynthesis.cancel();
   if (ramuState.recognitionInstance) {
     try { ramuState.recognitionInstance.abort(); } catch (_) {}
+    ramuState.recognitionInstance = null;
   }
+  cleanupRamuMedia();
+  removeRamuLiveSpeechBubble();
   ramuState.isSpeaking = false;
   ramuState.isListening = false;
   updateRamuWaveUI();
+  updateRamuMicButton(false);
 }
 
 function toggleRamuMute() {
@@ -3042,75 +3164,301 @@ function speakRamuKaka(text, onEnd) {
   }
 }
 
-function startRamuListening() {
-  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRec) {
-    setRamuStatus("Voice dictation not available. Please tap an option below.", "info");
-    return;
-  }
+// Dual-Engine Audio State for Ramu Kaka Voice AI (Edge & Chrome Bulletproof)
+const ramuAudioState = {
+  mediaStream: null,
+  mediaRecorder: null,
+  audioChunks: [],
+  finalTranscriptReceived: false,
+  silenceTimer: null,
+  maxTimeout: null
+};
 
-  if (window.speechSynthesis) window.speechSynthesis.cancel();
+function cleanupRamuMedia() {
+  if (ramuAudioState.mediaStream) {
+    try {
+      ramuAudioState.mediaStream.getTracks().forEach(t => t.stop());
+    } catch (_) {}
+    ramuAudioState.mediaStream = null;
+  }
+  ramuAudioState.mediaRecorder = null;
+  if (ramuAudioState.silenceTimer) {
+    clearTimeout(ramuAudioState.silenceTimer);
+    ramuAudioState.silenceTimer = null;
+  }
+  if (ramuAudioState.maxTimeout) {
+    clearTimeout(ramuAudioState.maxTimeout);
+    ramuAudioState.maxTimeout = null;
+  }
+}
+
+function updateRamuLiveSpeechBubble(text) {
+  const container = document.getElementById("ramuDialogueContainer");
+  if (!container) return;
+  let bubble = document.getElementById("ramuLiveSpeechBubble");
+  if (!bubble) {
+    bubble = document.createElement("div");
+    bubble.id = "ramuLiveSpeechBubble";
+    bubble.className = "flex items-start space-x-2.5 max-w-[88%] ml-auto flex-row-reverse space-x-reverse transition-all mb-2";
+    bubble.innerHTML = `
+      <div class="w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center text-sm shadow-xs flex-shrink-0 animate-pulse font-bold">
+        🎙️
+      </div>
+      <div class="p-3 rounded-2xl rounded-tr-xs bg-amber-100 border border-amber-300 text-amber-950 text-xs sm:text-sm font-semibold shadow-2xs leading-relaxed flex items-center space-x-2">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-ping shrink-0"></span>
+        <span id="ramuLiveSpeechText">Listening live... Speak now</span>
+      </div>
+    `;
+    container.appendChild(bubble);
+  }
+  const textSpan = document.getElementById("ramuLiveSpeechText");
+  if (textSpan && text) {
+    textSpan.textContent = text;
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function removeRamuLiveSpeechBubble() {
+  const bubble = document.getElementById("ramuLiveSpeechBubble");
+  if (bubble) bubble.remove();
+}
+
+async function startRamuListening() {
+  if (window.speechSynthesis) {
+    try { window.speechSynthesis.cancel(); } catch (_) {}
+  }
+  ramuState.isSpeaking = false;
+  ramuAudioState.finalTranscriptReceived = false;
+  ramuAudioState.audioChunks = [];
 
   if (ramuState.recognitionInstance) {
     try { ramuState.recognitionInstance.abort(); } catch (_) {}
+    ramuState.recognitionInstance = null;
   }
+  cleanupRamuMedia();
+
+  // 1. Explicitly prompt / acquire microphone permission in Edge & browsers
+  let stream = null;
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      ramuAudioState.mediaStream = stream;
+    }
+  } catch (micErr) {
+    console.warn("Microphone access error in Edge/Browser:", micErr);
+    setRamuStatus("Microphone access blocked. Click the lock/mic icon in Edge address bar to allow.", "error");
+    showToast("⚠️ Microphone access was blocked. Please click the lock or camera icon in Microsoft Edge address bar to allow microphone permissions.", "warning");
+    updateRamuMicButton(false);
+    return;
+  }
+
+  ramuState.isListening = true;
+  updateRamuWaveUI();
+  updateRamuMicButton(true);
+  setRamuStatus("🔴 Listening live... Say 'What to cook' (Tap mic when done)", "listening");
+  updateRamuLiveSpeechBubble("Listening live... Speak now");
+
+  // 2. Start MediaRecorder (Engine B - Bulletproof on Microsoft Edge)
+  if (stream && typeof MediaRecorder !== "undefined") {
+    try {
+      let mimeType = "";
+      if (MediaRecorder.isTypeSupported("audio/webm;codecs=opus")) mimeType = "audio/webm;codecs=opus";
+      else if (MediaRecorder.isTypeSupported("audio/webm")) mimeType = "audio/webm";
+      else if (MediaRecorder.isTypeSupported("audio/mp4")) mimeType = "audio/mp4";
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      ramuAudioState.mediaRecorder = recorder;
+      ramuAudioState.audioChunks = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          ramuAudioState.audioChunks.push(e.data);
+        }
+      };
+
+      recorder.start(200);
+    } catch (e) {
+      console.warn("MediaRecorder start notice:", e);
+    }
+  }
+
+  // 3. Start Web Speech API (Engine A) with Edge-compatible settings
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRec) {
+    try {
+      const rec = new SpeechRec();
+      ramuState.recognitionInstance = rec;
+      rec.continuous = true; // Crucial for Edge: prevents premature closing after 500ms
+      rec.interimResults = true; // Crucial for on-screen live data
+      rec.lang = navigator.language || "en-US"; // Edge connects reliably with navigator.language
+
+      rec.onstart = () => {
+        ramuState.isListening = true;
+        updateRamuWaveUI();
+        updateRamuMicButton(true);
+      };
+
+      rec.onresult = (e) => {
+        let interim = "";
+        let final = "";
+        for (let i = 0; i < e.results.length; ++i) {
+          const res = e.results[i];
+          if (res.isFinal) {
+            final += res[0].transcript;
+          } else {
+            interim += res[0].transcript;
+          }
+        }
+        const text = (final || interim).trim();
+        if (text) {
+          updateRamuLiveSpeechBubble(`Hearing: "${text}"`);
+        }
+
+        if (final.trim()) {
+          ramuAudioState.finalTranscriptReceived = true;
+          if (ramuAudioState.silenceTimer) clearTimeout(ramuAudioState.silenceTimer);
+          ramuAudioState.silenceTimer = setTimeout(() => {
+            stopRamuListening(final.trim());
+          }, 800);
+        }
+      };
+
+      rec.onerror = (err) => {
+        console.warn("SpeechRec error event:", err.error);
+        if (err.error === "not-allowed") {
+          showToast("Microphone permission denied. Allow it in Edge settings.", "error");
+        }
+        // If Edge network error happened, we don't quit! Engine B (MediaRecorder) has the recorded audio!
+      };
+
+      rec.onend = () => {
+        // Recognition ended
+      };
+
+      rec.start();
+    } catch (speechErr) {
+      console.warn("SpeechRecognition init error:", speechErr);
+    }
+  }
+
+  // Safety timer: stop after 14 seconds
+  ramuAudioState.maxTimeout = setTimeout(() => {
+    if (ramuState.isListening) {
+      stopRamuListening();
+    }
+  }, 14000);
+}
+
+async function stopRamuListening(recognizedText = null) {
+  if (!ramuState.isListening && !recognizedText) return;
+  ramuState.isListening = false;
+  updateRamuWaveUI();
+  updateRamuMicButton(false);
+
+  // Stop Web Speech Recognition
+  if (ramuState.recognitionInstance) {
+    try { ramuState.recognitionInstance.stop(); } catch (_) {}
+    ramuState.recognitionInstance = null;
+  }
+
+  // If Engine A already captured the transcript
+  if (recognizedText && recognizedText.trim()) {
+    removeRamuLiveSpeechBubble();
+    cleanupRamuMedia();
+    handleUserSpokenInput(recognizedText.trim());
+    return;
+  }
+
+  // Otherwise, check Engine B MediaRecorder audio chunks
+  const recorder = ramuAudioState.mediaRecorder;
+  if (recorder && recorder.state !== "inactive") {
+    updateRamuLiveSpeechBubble("Processing your voice audio...");
+    setRamuStatus("Processing voice audio...", "speaking");
+    await new Promise(resolve => {
+      recorder.onstop = resolve;
+      try { recorder.stop(); } catch (_) { resolve(); }
+    });
+  }
+
+  const chunks = [...ramuAudioState.audioChunks];
+  cleanupRamuMedia();
+
+  if (chunks.length === 0) {
+    removeRamuLiveSpeechBubble();
+    setRamuStatus("Didn't catch that. Tap the mic or choose an option below.", "info");
+    return;
+  }
+
+  const audioBlob = new Blob(chunks, { type: chunks[0]?.type || "audio/webm" });
+  if (audioBlob.size < 1200) {
+    removeRamuLiveSpeechBubble();
+    setRamuStatus("Didn't catch that. Tap the mic or choose an option below.", "info");
+    return;
+  }
+
+  // Send audio to Gemini via /api/transcribe-audio
+  updateRamuLiveSpeechBubble("Transcribing with Gemini AI...");
+  setRamuStatus("Transcribing with Gemini AI...", "speaking");
 
   try {
-    const rec = new SpeechRec();
-    ramuState.recognitionInstance = rec;
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.lang = "en-IN";
+    const reader = new FileReader();
+    const base64Promise = new Promise(resolve => {
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(audioBlob);
+    });
+    const base64Data = await base64Promise;
 
-    rec.onstart = () => {
-      ramuState.isListening = true;
-      updateRamuWaveUI();
-      updateRamuMicButton(true);
-    };
+    const headers = { "Content-Type": "application/json" };
+    if (appState.apiKey) headers["X-Gemini-Key"] = appState.apiKey;
 
-    rec.onresult = (e) => {
-      const transcript = e.results?.[0]?.[0]?.transcript || "";
-      if (transcript.trim()) {
-        handleUserSpokenInput(transcript.trim());
+    const res = await fetch("/api/transcribe-audio", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        audio: base64Data,
+        mime_type: audioBlob.type || "audio/webm"
+      })
+    });
+
+    removeRamuLiveSpeechBubble();
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === "success" && data.transcript && data.transcript.trim()) {
+        handleUserSpokenInput(data.transcript.trim());
+        return;
       }
-    };
-
-    rec.onerror = (err) => {
-      console.warn("Ramu speech recognition notice:", err.error);
-      ramuState.isListening = false;
-      updateRamuWaveUI();
-      updateRamuMicButton(false);
-      if (err.error === "no-speech") {
-        setRamuStatus("Didn't catch that. Tap the mic or choose an option below.", "info");
-      }
-    };
-
-    rec.onend = () => {
-      ramuState.isListening = false;
-      updateRamuWaveUI();
-      updateRamuMicButton(false);
-    };
-
-    rec.start();
-  } catch (e) {
-    console.error("Failed to start speech recognition:", e);
-    ramuState.isListening = false;
-    updateRamuWaveUI();
-    updateRamuMicButton(false);
+    }
+  } catch (err) {
+    console.warn("Backend audio transcription error:", err);
   }
+
+  removeRamuLiveSpeechBubble();
+  setRamuStatus("Could not transcribe speech. Tap mic again or type message below.", "info");
 }
 
 function toggleRamuListening() {
   if (ramuState.isListening) {
-    if (ramuState.recognitionInstance) {
-      try { ramuState.recognitionInstance.stop(); } catch (_) {}
-    }
-    ramuState.isListening = false;
-    updateRamuWaveUI();
-    updateRamuMicButton(false);
+    stopRamuListening();
   } else {
     startRamuListening();
   }
+}
+
+function handleRamuInputKey(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    sendRamuTextMessage();
+  }
+}
+
+function sendRamuTextMessage() {
+  const input = document.getElementById("ramuTextInput");
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  handleUserSpokenInput(text);
 }
 
 function parseRamuTime(str) {
